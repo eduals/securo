@@ -92,8 +92,10 @@ services:
   backend:
     <<: *backend-base
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
+    # No host port published — the frontend (nginx) proxies /api to
+    # http://backend:8000 over the internal network, and Traefik fronts the
+    # frontend. Publishing 8000 on the host only causes port conflicts on a
+    # shared Portainer box. Re-add `ports` only if you need direct access.
 
   frontend:
     image: ghcr.io/securo-finance/securo-frontend:latest
