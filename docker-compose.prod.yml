@@ -134,13 +134,16 @@ services:
   # Reuses the backend image, just runs a different uvicorn entry point.
   # Modular by design — users not using the agents feature pay zero cost.
   #
-  # Exposed through Traefik on its own subdomain (SECURO_MCP_DOMAIN) so
-  # external agents — Claude Desktop, n8n, Hermes, custom clients — reach it
-  # over HTTPS after minting a token from the UI. JWT auth is always required.
+  # Exposed through Traefik on the SAME domain as the app, under the /mcp
+  # path — so external agents (Claude Desktop, n8n, Hermes, custom clients)
+  # reach it over HTTPS at https://${SECURO_DOMAIN}/mcp after minting a token
+  # from the UI. JWT auth is always required. Single-domain keeps DNS/TLS
+  # simple and matches the MCP server's own route layout (POST /mcp).
   #
-  # NOTE: the in-app "External MCP access" panel still generates a URL with
-  # `:8765`. When connecting Hermes, ignore that and use the Traefik URL:
-  # https://${SECURO_MCP_DOMAIN}/mcp
+  # The PathPrefix router has higher priority than the frontend's catch-all
+  # Host router, so only /mcp hits this service; everything else still goes
+  # to the SPA. (The app's "External MCP access" panel prints a `:8765` URL —
+  # ignore it; connect Hermes to https://${SECURO_DOMAIN}/mcp instead.)
   mcp-server:
     <<: *backend-base
     profiles: [agents]
@@ -151,7 +154,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=proxy"
-      - "traefik.http.routers.securo-mcp.rule=Host(`${SECURO_MCP_DOMAIN}`)"
+      - "traefik.http.routers.securo-mcp.rule=Host(`${SECURO_DOMAIN}`) && PathPrefix(`/mcp`)"
+      - "traefik.http.routers.securo-mcp.priority=100"
       - "traefik.http.routers.securo-mcp.entrypoints=websecure"
       - "traefik.http.routers.securo-mcp.tls=true"
       - "traefik.http.routers.securo-mcp.tls.certresolver=le"

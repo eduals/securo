@@ -16,7 +16,13 @@ externo (como o seu **Hermes**) para **ler dados** e **registrar atividades**
    E suba: `docker compose up -d` (sobe o container `mcp-server`).
 2. No Securo: **Settings → AI Agents → External MCP access → Generate token**.
    Copie o **token** (JWT) — ele **não é mostrado de novo**.
-3. O endpoint do Hermes é: `http://SEU_HOST:8765/mcp` (JSON-RPC 2.0 via `POST`).
+3. O endpoint do Hermes é:
+   - **Produção (atrás do Traefik, domínio único):** `https://securo.pipedocs.app/mcp`
+   - Dev/local (porta publicada): `http://SEU_HOST:8765/mcp`
+
+   JSON-RPC 2.0 via `POST`. **Ignore** o `:8765` que o painel "External MCP
+   access" imprime — em produção o MCP é roteado pelo Traefik no path `/mcp`
+   do mesmo domínio do app (sem porta, com HTTPS).
 4. Autentique toda chamada com `Authorization: Bearer <token>`.
 5. Para registrar algo, use as tools `propose_*` em **duas chamadas**:
    1ª chamada = preview (sem `apply`), 2ª chamada = `apply: true` (executa).
