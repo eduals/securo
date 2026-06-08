@@ -97,14 +97,26 @@ services:
 
   frontend:
     image: ghcr.io/securo-finance/securo-frontend:latest
-    ports:
-      - "${FRONTEND_PORT:-3000}:80"
     environment:
       BACKEND_URL: http://backend:8000
-      FRONTEND_URL: http://localhost:3000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       - backend
     restart: unless-stopped
+    # Served through Traefik (no host port published). `default` keeps it on
+    # the internal network so it can reach `backend`; `proxy` is the external
+    # Traefik network you already run.
+    networks:
+      - default
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.securo.rule=Host(`${SECURO_DOMAIN}`)"
+      - "traefik.http.routers.securo.entrypoints=websecure"
+      - "traefik.http.routers.securo.tls=true"
+      - "traefik.http.routers.securo.tls.certresolver=le"
+      - "traefik.http.services.securo.loadbalancer.server.port=80"
 
   celery-worker:
     <<: *backend-base
@@ -120,16 +132,36 @@ services:
   # Reuses the backend image, just runs a different uvicorn entry point.
   # Modular by design — users not using the agents feature pay zero cost.
   #
-  # The port is published on the host (127.0.0.1 by default) so external
-  # agents — Claude Desktop, n8n, custom clients — can reach it after
-  # minting a token from the UI. JWT auth is always required. Override
-  # AGENTS_MCP_EXTERNAL_HOST_PORT to e.g. "0.0.0.0:8765" to expose to LAN.
+  # Exposed through Traefik on its own subdomain (SECURO_MCP_DOMAIN) so
+  # external agents — Claude Desktop, n8n, Hermes, custom clients — reach it
+  # over HTTPS after minting a token from the UI. JWT auth is always required.
+  #
+  # NOTE: the in-app "External MCP access" panel still generates a URL with
+  # `:8765`. When connecting Hermes, ignore that and use the Traefik URL:
+  # https://${SECURO_MCP_DOMAIN}/mcp
   mcp-server:
     <<: *backend-base
     profiles: [agents]
     command: uvicorn mcp_server.main:app --host 0.0.0.0 --port 8765
-    ports:
-      - "${AGENTS_MCP_EXTERNAL_HOST_PORT:-127.0.0.1:8765}:8765"
+    networks:
+      - default
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.securo-mcp.rule=Host(`${SECURO_MCP_DOMAIN}`)"
+      - "traefik.http.routers.securo-mcp.entrypoints=websecure"
+      - "traefik.http.routers.securo-mcp.tls=true"
+      - "traefik.http.routers.securo-mcp.tls.certresolver=le"
+      - "traefik.http.services.securo-mcp.loadbalancer.server.port=8765"
+
+networks:
+  # Your existing Traefik network. Must already exist on the host:
+  #   docker network create proxy
+  proxy:
+    external: true
+  default:
+    driver: bridge
 
 volumes:
   pgdata:
