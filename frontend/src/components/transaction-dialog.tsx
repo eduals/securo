@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { AlertTriangle, ChevronDown, ChevronLeft, Download, Eye, EyeClosed, Paperclip, Upload, X, FileText, Plus, Unlink, SlidersHorizontal, Repeat } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronLeft, Download, Eye, EyeClosed, Paperclip, Upload, X, FileText, Plus, Unlink, SlidersHorizontal } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -355,13 +355,7 @@ function TransactionForm({
   const [isRecurring, setIsRecurring] = useState(false)
   const [frequency, setFrequency] = useState<'monthly' | 'weekly' | 'yearly'>('monthly')
   const [endDate, setEndDate] = useState('')
-  // Convert an existing transaction into a recurring rule (distinct from the
-  // create-flow recurring toggle above).
   const queryClient = useQueryClient()
-  const [showToRecurring, setShowToRecurring] = useState(false)
-  const [convertFreq, setConvertFreq] = useState<'monthly' | 'weekly' | 'yearly'>('monthly')
-  const [convertEndDate, setConvertEndDate] = useState('')
-  const [converting, setConverting] = useState(false)
   // Inline payee creation straight from the transaction editor.
   const [creatingPayee, setCreatingPayee] = useState(false)
   const [newPayeeName, setNewPayeeName] = useState('')
@@ -401,23 +395,6 @@ function TransactionForm({
     }
   }
 
-  const handleConvertToRecurring = async () => {
-    if (!transaction) return
-    setConverting(true)
-    try {
-      await transactionsApi.toRecurring(transaction.id, {
-        frequency: convertFreq,
-        end_date: convertEndDate || null,
-      })
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
-      toast.success(t('transactions.convertedToRecurring'))
-      setShowToRecurring(false)
-    } catch {
-      toast.error(t('transactions.convertToRecurringError'))
-    } finally {
-      setConverting(false)
-    }
-  }
   // Optional split-with-group payload. `null` = leave splits as-is on
   // update, or no splits on create. The dedicated section component
   // owns its own UI state and surfaces a normalized payload here.
@@ -622,7 +599,9 @@ function TransactionForm({
               ...overridePayload,
               ...splitsPayload,
             } as Partial<Transaction>
-        const recurringData = isCreating && isRecurring
+        // Carried for both create and edit: when the recurring checkbox is
+        // on, the parent creates the recurring rule on save (skip_first).
+        const recurringData = isRecurring
           ? { frequency, end_date: endDate || undefined }
           : undefined
         onSave(txData, recurringData, isCreating && pendingFiles.length > 0 ? pendingFiles : undefined, action)
@@ -930,8 +909,9 @@ function TransactionForm({
         />
       )}
 
-      {/* Recurring toggle — only shown when creating non-synced */}
-      {isCreating && !isSynced && (
+      {/* Recurring toggle — shown below attachments in both create and edit
+          flows (non-synced). On save the parent creates the recurring rule. */}
+      {!isSynced && (isCreating || transaction) && (
         <div className="space-y-3 border rounded-md p-3">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -967,39 +947,6 @@ function TransactionForm({
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Convert an existing transaction into a recurring rule. */}
-      {showToRecurring && transaction && (
-        <div className="space-y-3 border rounded-md p-3">
-          <p className="text-sm font-medium">{t('transactions.convertToRecurringTitle')}</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>{t('recurring.frequency')}</Label>
-              <select
-                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus-visible:ring-ring/30 focus-visible:ring-[2px]"
-                value={convertFreq}
-                onChange={(e) => setConvertFreq(e.target.value as 'monthly' | 'weekly' | 'yearly')}
-              >
-                <option value="monthly">{t('recurring.monthly')}</option>
-                <option value="weekly">{t('recurring.weekly')}</option>
-                <option value="yearly">{t('recurring.yearly')}</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>{t('recurring.endDate')}</Label>
-              <DatePickerInput
-                value={convertEndDate}
-                onChange={setConvertEndDate}
-                placeholder={t('recurring.endDate')}
-                className="w-full justify-start"
-              />
-            </div>
-          </div>
-          <Button type="button" onClick={handleConvertToRecurring} disabled={converting}>
-            {converting ? t('common.loading') : t('transactions.confirmConvertToRecurring')}
-          </Button>
         </div>
       )}
 
@@ -1041,18 +988,6 @@ function TransactionForm({
             >
               <SlidersHorizontal size={16} />
               {t('transactions.createRule')}
-            </Button>
-          )}
-          {transaction && !isSynced && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowToRecurring((v) => !v)}
-              className="gap-1.5"
-              title={t('transactions.makeRecurring')}
-            >
-              <Repeat size={16} />
-              {t('transactions.makeRecurring')}
             </Button>
           )}
         </div>
