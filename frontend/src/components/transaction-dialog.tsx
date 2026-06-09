@@ -57,6 +57,10 @@ export function extractApiError(error: unknown): string {
   return 'An unexpected error occurred'
 }
 
+// Sentinel value for the in-dropdown "+ Add payee" entry. Picking it opens
+// the inline create form rather than selecting a real payee.
+const CREATE_PAYEE_OPTION = '__create_payee__'
+
 function isImageType(contentType: string): boolean {
   return contentType.startsWith('image/')
 }
@@ -358,6 +362,44 @@ function TransactionForm({
   const [convertFreq, setConvertFreq] = useState<'monthly' | 'weekly' | 'yearly'>('monthly')
   const [convertEndDate, setConvertEndDate] = useState('')
   const [converting, setConverting] = useState(false)
+  // Inline payee creation straight from the transaction editor.
+  const [creatingPayee, setCreatingPayee] = useState(false)
+  const [newPayeeName, setNewPayeeName] = useState('')
+  const [savingPayee, setSavingPayee] = useState(false)
+
+  const openCreatePayee = () => {
+    // Pre-fill with the raw payee (synced) or the description (manual).
+    setNewPayeeName(transaction?.payee || description || '')
+    setCreatingPayee(true)
+  }
+
+  const handlePayeeSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    // The "+ Add payee" entry is a sentinel option, not a real payee: it
+    // opens the inline create form instead of selecting a value.
+    if (e.target.value === CREATE_PAYEE_OPTION) {
+      openCreatePayee()
+      return
+    }
+    setPayeeId(e.target.value)
+  }
+
+  const handleCreatePayee = async () => {
+    const name = newPayeeName.trim()
+    if (!name) return
+    setSavingPayee(true)
+    try {
+      const created = await payeesApi.create({ name })
+      await queryClient.invalidateQueries({ queryKey: ['payees'] })
+      setPayeeId(created.id) // auto-select the new payee
+      setCreatingPayee(false)
+      setNewPayeeName('')
+      toast.success(t('payees.created'))
+    } catch {
+      toast.error(t('payees.createError'))
+    } finally {
+      setSavingPayee(false)
+    }
+  }
 
   const handleConvertToRecurring = async () => {
     if (!transaction) return
@@ -758,14 +800,33 @@ function TransactionForm({
           <Label>{t('payees.payee')}</Label>
           <select
             className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus-visible:ring-ring/30 focus-visible:ring-[2px]"
-            value={payeeId}
-            onChange={(e) => setPayeeId(e.target.value)}
+            value={creatingPayee ? CREATE_PAYEE_OPTION : payeeId}
+            onChange={handlePayeeSelectChange}
           >
             <option value="">{t('payees.noPayee')}</option>
             {(payeesList ?? []).map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
+            <option value={CREATE_PAYEE_OPTION}>{t('payees.addNew')}</option>
           </select>
+          {creatingPayee && (
+            <div className="space-y-2 border rounded-md p-2">
+              <Input
+                value={newPayeeName}
+                onChange={(e) => setNewPayeeName(e.target.value)}
+                placeholder={t('payees.namePlaceholder')}
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button type="button" size="sm" onClick={handleCreatePayee} disabled={savingPayee || !newPayeeName.trim()}>
+                  {savingPayee ? t('common.loading') : t('common.save')}
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => { setCreatingPayee(false); setNewPayeeName('') }}>
+                  {t('common.cancel')}
+                </Button>
+              </div>
+            </div>
+          )}
           {isSynced && transaction?.payee && (
             <p className="text-xs text-muted-foreground">{t('payees.rawPayee')}: {transaction.payee}</p>
           )}
