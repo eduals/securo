@@ -1007,9 +1007,12 @@ function TransactionForm({
 
       <DialogFooter className={cn(
         'shrink-0 border-t pt-4 mt-2',
-        (onDelete || seed?.id) ? 'flex justify-between sm:justify-between' : ''
+        // flex-wrap so a crowded edit-mode footer (delete / ignore / create
+        // rule / make recurring on the left) wraps instead of pushing the
+        // Save button out of view on narrow modals.
+        (onDelete || seed?.id) ? 'flex flex-wrap gap-2 justify-between sm:justify-between' : ''
       )}>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           {onDelete && (
             <Button type="button" variant="destructive" onClick={onDelete} disabled={loading}>
               {t('common.delete')}
