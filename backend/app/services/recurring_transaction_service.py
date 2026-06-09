@@ -94,6 +94,35 @@ async def create_recurring_transaction(
     return recurring
 
 
+async def create_from_transaction(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    transaction: Transaction,
+    frequency: str,
+    day_of_month: Optional[int] = None,
+    end_date: Optional[date] = None,
+) -> RecurringTransaction:
+    """Create a recurring rule from an existing transaction.
+
+    The transaction already represents the first occurrence, so skip_first=True
+    keeps generate_pending from materializing a duplicate on the original date."""
+    data = RecurringTransactionCreate(
+        description=transaction.description,
+        amount=abs(transaction.amount),
+        currency=transaction.currency,
+        type=transaction.type,
+        frequency=frequency,
+        day_of_month=day_of_month or transaction.date.day,
+        start_date=transaction.date,
+        end_date=end_date,
+        account_id=transaction.account_id,
+        category_id=transaction.category_id,
+        skip_first=True,
+    )
+    return await create_recurring_transaction(session, workspace_id, user_id, data)
+
+
 async def update_recurring_transaction(
     session: AsyncSession, recurring_id: uuid.UUID, workspace_id: uuid.UUID, data: RecurringTransactionUpdate
 ) -> Optional[RecurringTransaction]:

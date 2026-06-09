@@ -175,3 +175,12 @@ class TransactionImportRequest(BaseModel):
     filename: str = ""
     detected_format: str = ""
     detect_duplicates: bool = True
+
+
+class TransactionToRecurring(BaseModel):
+    """Request body for converting an existing transaction into a recurring
+    rule. The transaction itself stands in for the first occurrence, so the
+    service skips materializing a duplicate on the original date."""
+    frequency: str  # "monthly" | "weekly" | "yearly"
+    day_of_month: Optional[int] = None  # derived from the transaction date when omitted
+    end_date: Optional[_Date] = None
