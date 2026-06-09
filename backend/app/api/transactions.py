@@ -15,8 +15,9 @@ from app.core.workspace_context import (
     current_workspace,
     current_writable_workspace,
 )
-from app.schemas.transaction import BulkAddToGroupRequest, BulkCategorizeRequest, BulkTagsRequest, CreateCounterpartRequest, LinkTransferRequest, TransactionCreate, TransactionRead, TransactionUpdate, TransferCreate, TransferRead
-from app.services import transaction_service
+from app.schemas.recurring_transaction import RecurringTransactionRead
+from app.schemas.transaction import BulkAddToGroupRequest, BulkCategorizeRequest, BulkTagsRequest, CreateCounterpartRequest, LinkTransferRequest, TransactionCreate, TransactionRead, TransactionToRecurring, TransactionUpdate, TransferCreate, TransferRead
+from app.services import recurring_transaction_service, transaction_service
 from app.services.admin_service import get_credit_card_accounting_mode
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -414,3 +415,36 @@ async def delete_transaction(
     )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+
+
+@router.post(
+    "/{transaction_id}/to-recurring",
+    response_model=RecurringTransactionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def transaction_to_recurring(
+    transaction_id: uuid.UUID,
+    data: TransactionToRecurring,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Turn an existing transaction into a recurring rule. The transaction
+    stands in for the first occurrence (skip_first), so no duplicate is
+    generated on the original date."""
+    transaction = await transaction_service.get_transaction(
+        session, transaction_id, ctx.workspace.id
+    )
+    if not transaction:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+    try:
+        return await recurring_transaction_service.create_from_transaction(
+            session,
+            ctx.workspace.id,
+            ctx.user_id,
+            transaction,
+            frequency=data.frequency,
+            day_of_month=data.day_of_month,
+            end_date=data.end_date,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

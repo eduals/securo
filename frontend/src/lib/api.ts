@@ -399,6 +399,13 @@ export const transactions = {
     const { data } = await api.patch(`/transactions/${id}/ignore`)
     return data
   },
+  toRecurring: async (
+    id: string,
+    payload: { frequency: 'monthly' | 'weekly' | 'yearly'; day_of_month?: number; end_date?: string | null }
+  ): Promise<RecurringTransaction> => {
+    const { data } = await api.post(`/transactions/${id}/to-recurring`, payload)
+    return data
+  },
   createTransfer: async (transfer: {
     from_account_id: string
     to_account_id: string

@@ -290,3 +290,55 @@ async def test_generate_pending_skips_legacy_null_account(
     # Should not raise; should report 0 generated for the legacy row.
     count = await generate_pending(session, test_user.id, up_to=_date(2026, 4, 1))
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_transaction_to_recurring_creates_rule_and_skips_first(
+    client, auth_headers, test_account, test_categories
+):
+    """Converting a transaction into a recurring rule reuses its data and
+    skips the first occurrence (no duplicate on the original date)."""
+    tx = (await client.post(
+        "/api/transactions",
+        headers=auth_headers,
+        json={
+            "account_id": str(test_account.id),
+            "category_id": str(test_categories[0].id),
+            "description": "Netflix",
+            "amount": "39.90",
+            "date": "2026-06-09",
+            "type": "debit",
+        },
+    )).json()
+
+    resp = await client.post(
+        f"/api/transactions/{tx['id']}/to-recurring",
+        headers=auth_headers,
+        json={"frequency": "monthly"},
+    )
+    assert resp.status_code == 201
+    rec = resp.json()
+    assert rec["description"] == "Netflix"
+    assert rec["frequency"] == "monthly"
+    assert rec["start_date"] == "2026-06-09"
+    assert rec["category_id"] == str(test_categories[0].id)
+    assert rec["account_id"] == str(test_account.id)
+    # skip_first => next occurrence is one month after the transaction date
+    assert rec["next_occurrence"] == "2026-07-09"
+
+    # The original transaction is not duplicated (still exactly one "Netflix").
+    listing = (await client.get(
+        f"/api/transactions?account_id={test_account.id}", headers=auth_headers
+    )).json()
+    assert len([t for t in listing["items"] if t["description"] == "Netflix"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_transaction_to_recurring_unknown_id_404(client, auth_headers):
+    import uuid as _uuid
+    resp = await client.post(
+        f"/api/transactions/{_uuid.uuid4()}/to-recurring",
+        headers=auth_headers,
+        json={"frequency": "monthly"},
+    )
+    assert resp.status_code == 404
