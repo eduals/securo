@@ -15,7 +15,8 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import type { Budget } from '@/types'
-import { Pencil, Trash2, Plus, Repeat, CalendarIcon } from 'lucide-react'
+import { Pencil, Trash2, Plus, Repeat, CalendarIcon, Sparkles } from 'lucide-react'
+import { BudgetForecastDialog } from '@/components/budget-forecast-dialog'
 import { format } from 'date-fns'
 import { ptBR, enUS } from 'date-fns/locale'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -68,6 +69,7 @@ export default function BudgetsPage() {
   const monthParam = `${selectedMonth}-01`
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Budget | null>(null)
+  const [forecastOpen, setForecastOpen] = useState(false)
 
   const { data: budgetsList } = useQuery({
     queryKey: ['budgets', selectedMonth],
@@ -184,9 +186,14 @@ export default function BudgetsPage() {
           title={t('budgets.title')}
           action={
             canWrite ? (
-              <Button size="sm" className="gap-1.5 h-8" onClick={() => { setEditing(null); setDialogOpen(true) }}>
-                <Plus size={13} /> {t('budgets.add')}
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => setForecastOpen(true)}>
+                  <Sparkles size={13} /> {t('budgets.generateForecast')}
+                </Button>
+                <Button size="sm" className="gap-1.5 h-8" onClick={() => { setEditing(null); setDialogOpen(true) }}>
+                  <Plus size={13} /> {t('budgets.add')}
+                </Button>
+              </div>
             ) : undefined
           }
         />
@@ -240,6 +247,15 @@ export default function BudgetsPage() {
           <p className="text-sm text-muted-foreground text-center py-10">{t('budgets.empty')}</p>
         )}
       </SectionCard>
+
+      {forecastOpen && (
+        <BudgetForecastDialog
+          open
+          targetMonth={monthParam}
+          onClose={() => setForecastOpen(false)}
+          onApplied={() => queryClient.invalidateQueries({ queryKey: ['budgets'] })}
+        />
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={() => { setDialogOpen(false); setEditing(null) }}>
         <DialogContent>
