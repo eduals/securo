@@ -51,7 +51,7 @@ x-backend-env: &backend-env
   AGENTS_EMBEDDING_MODEL: ${AGENTS_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
 
 x-backend-base: &backend-base
-  image: ghcr.io/securo-finance/securo-backend:latest
+  image: ghcr.io/eduals/securo-backend:latest
   environment: *backend-env
   depends_on:
     db: { condition: service_healthy }
@@ -98,7 +98,7 @@ services:
     # shared Portainer box. Re-add `ports` only if you need direct access.
 
   frontend:
-    image: ghcr.io/securo-finance/securo-frontend:latest
+    image: ghcr.io/eduals/securo-frontend:latest
     environment:
       BACKEND_URL: http://backend:8000
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
