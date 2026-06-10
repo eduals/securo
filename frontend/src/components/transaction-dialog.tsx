@@ -3,6 +3,7 @@ import { getAccountName } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
 import { currencies as currenciesApi, transactions as transactionsApi, settings as settingsApi, payees as payeesApi, rules as rulesApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -337,6 +338,17 @@ function TransactionForm({
     queryKey: ['rules'],
     queryFn: rulesApi.list,
   })
+  const navigate = useNavigate()
+  // Active category rules that already cover this (saved) transaction. When
+  // present, "add to an existing rule" is redundant, so we disable it and
+  // show which rule applies. Edit mode only (needs a persisted id).
+  const { data: matchingRulesData } = useQuery({
+    queryKey: ['matching-rules', transaction?.id],
+    queryFn: () => transactionsApi.matchingRules(transaction!.id),
+    enabled: !!transaction?.id && !isSynced,
+  })
+  const matchingRules = matchingRulesData?.rules ?? []
+  const alreadyInRule = matchingRules.length > 0
   const seed = transaction ?? duplicateDraft
   const [description, setDescription] = useState(seed?.description ?? '')
   const [amount, setAmount] = useState(seed?.amount?.toString() ?? '')
@@ -614,7 +626,7 @@ function TransactionForm({
           : undefined
         // Fold this description into the chosen rule (idempotent server-side).
         // Independent of the transaction save; surfaced with its own toast.
-        if (addToRule && selectedRuleId && description.trim()) {
+        if (addToRule && !alreadyInRule && selectedRuleId && description.trim()) {
           rulesApi.addDescription(selectedRuleId, description.trim())
             .then(() => {
               queryClient.invalidateQueries({ queryKey: ['rules'] })
@@ -973,16 +985,36 @@ function TransactionForm({
           applied on save. Only shown when at least one rule exists. */}
       {!isSynced && (isCreating || transaction) && (rulesList?.length ?? 0) > 0 && (
         <div className="space-y-3 border rounded-md p-3">
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className={cn('flex items-center gap-2', alreadyInRule ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}>
             <input
               type="checkbox"
-              checked={addToRule}
+              checked={addToRule && !alreadyInRule}
+              disabled={alreadyInRule}
               onChange={(e) => setAddToRule(e.target.checked)}
               className="rounded border-gray-300"
             />
             <span className="text-sm font-medium">{t('transactions.addToExistingRule')}</span>
           </label>
-          {addToRule && (
+
+          {/* Already covered by active category rule(s): show which, linking to /rules */}
+          {alreadyInRule && (
+            <div className="text-xs text-muted-foreground space-y-1 pl-6">
+              {matchingRules.map((r) => (
+                <div key={r.id}>
+                  {t('transactions.ruleAlreadyActive')}:{' '}
+                  <button
+                    type="button"
+                    onClick={() => { onCancel(); navigate('/rules') }}
+                    className="text-primary hover:underline font-medium"
+                  >
+                    {r.name}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!alreadyInRule && addToRule && (
             <div className="space-y-2 pt-1">
               <Label>{t('transactions.addToExistingRuleLabel')}</Label>
               <select

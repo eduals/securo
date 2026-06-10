@@ -270,6 +270,7 @@
     "confirmDelete": "Tem certeza que deseja excluir esta transação?",
     "makeRecurring": "Tornar recorrente",
     "addToExistingRule": "Adicionar a uma regra existente",
+    "ruleAlreadyActive": "Regra atual ativa",
     "addToExistingRuleLabel": "Regra",
     "selectRule": "Selecione uma regra",
     "addedToRule": "Descrição adicionada à regra",
