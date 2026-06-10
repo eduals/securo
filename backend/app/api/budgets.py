@@ -11,8 +11,16 @@ from app.core.workspace_context import (
     current_workspace,
     current_writable_workspace,
 )
-from app.schemas.budget import BudgetCreate, BudgetRead, BudgetUpdate, BudgetVsActual
-from app.services import budget_service
+from app.schemas.budget import (
+    BudgetCreate,
+    BudgetForecastResponse,
+    BudgetFromForecastRequest,
+    BudgetFromForecastResult,
+    BudgetRead,
+    BudgetUpdate,
+    BudgetVsActual,
+)
+from app.services import budget_forecast_service, budget_service
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
 
@@ -69,3 +77,32 @@ async def budget_comparison(
     session: AsyncSession = Depends(get_async_session),
 ):
     return await budget_service.get_budget_vs_actual(session, ctx.workspace.id, ctx.user_id, month)
+
+
+@router.get("/forecast", response_model=BudgetForecastResponse)
+async def budget_forecast(
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    strategy: str = Query("average"),
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Suggest budget amounts per category from expenses in [from_date, to_date]."""
+    items = await budget_forecast_service.forecast_from_transactions(
+        session, ctx.workspace.id, from_date, to_date, strategy
+    )
+    return BudgetForecastResponse(from_date=from_date, to_date=to_date, strategy=strategy, items=items)
+
+
+@router.post("/from-forecast", response_model=BudgetFromForecastResult)
+async def apply_forecast(
+    payload: BudgetFromForecastRequest,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Create/update budgets for the target month from forecast items."""
+    created, updated = await budget_forecast_service.apply_forecast(
+        session, ctx.workspace.id, ctx.user_id,
+        payload.month, payload.is_recurring, payload.items,
+    )
+    return BudgetFromForecastResult(created=created, updated=updated)

@@ -843,6 +843,29 @@ export const budgets = {
     const { data } = await api.get('/budgets/comparison', { params: { month } })
     return data
   },
+  forecast: async (
+    fromDate: string,
+    toDate: string,
+    strategy: 'average' | 'total' = 'average',
+  ): Promise<{
+    from_date: string
+    to_date: string
+    strategy: string
+    items: { category_id: string; category_name: string; total: number; months: number; suggested_amount: number }[]
+  }> => {
+    const { data } = await api.get('/budgets/forecast', {
+      params: { from_date: fromDate, to_date: toDate, strategy },
+    })
+    return data
+  },
+  applyForecast: async (payload: {
+    month: string
+    is_recurring: boolean
+    items: { category_id: string; amount: number }[]
+  }): Promise<{ created: number; updated: number }> => {
+    const { data } = await api.post('/budgets/from-forecast', payload)
+    return data
+  },
 }
 
 // Goals

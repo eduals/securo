@@ -311,3 +311,75 @@ async def test_delete_recurring_previous_takes_effect(client, auth_headers, test
     cat_budgets2 = [b for b in list_resp2.json() if b["category_id"] == str(cat.id)]
     assert len(cat_budgets2) == 1
     assert float(cat_budgets2[0]["amount"]) == 100.0
+
+
+@pytest.mark.asyncio
+async def test_budget_forecast_average_over_period(
+    client, auth_headers, test_account, test_categories
+):
+    cat = test_categories[0]
+    # 2 months: 200 (Apr) + 400 (May) = 600 total => average 300/month
+    await client.post("/api/transactions", headers=auth_headers, json={
+        "description": "Compra", "amount": "200.00", "type": "debit",
+        "account_id": str(test_account.id), "category_id": str(cat.id), "date": "2026-04-10",
+    })
+    await client.post("/api/transactions", headers=auth_headers, json={
+        "description": "Compra", "amount": "400.00", "type": "debit",
+        "account_id": str(test_account.id), "category_id": str(cat.id), "date": "2026-05-10",
+    })
+
+    resp = await client.get(
+        "/api/budgets/forecast?from_date=2026-04-01&to_date=2026-05-31&strategy=average",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    item = next(i for i in body["items"] if i["category_id"] == str(cat.id))
+    assert float(item["total"]) == 600.0
+    assert item["months"] == 2
+    assert float(item["suggested_amount"]) == 300.0
+
+
+@pytest.mark.asyncio
+async def test_budget_forecast_total_strategy(
+    client, auth_headers, test_account, test_categories
+):
+    cat = test_categories[0]
+    await client.post("/api/transactions", headers=auth_headers, json={
+        "description": "X", "amount": "150.00", "type": "debit",
+        "account_id": str(test_account.id), "category_id": str(cat.id), "date": "2026-04-10",
+    })
+    resp = await client.get(
+        "/api/budgets/forecast?from_date=2026-04-01&to_date=2026-05-31&strategy=total",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    item = next(i for i in resp.json()["items"] if i["category_id"] == str(cat.id))
+    assert float(item["total"]) == 150.0
+    assert float(item["suggested_amount"]) == 150.0  # total strategy
+
+
+@pytest.mark.asyncio
+async def test_apply_forecast_creates_and_updates_budgets(
+    client, auth_headers, test_categories
+):
+    cat = test_categories[0]
+    resp = await client.post("/api/budgets/from-forecast", headers=auth_headers, json={
+        "month": "2026-06-01", "is_recurring": False,
+        "items": [{"category_id": str(cat.id), "amount": "250.00"}],
+    })
+    assert resp.status_code == 200
+    assert resp.json() == {"created": 1, "updated": 0}
+
+    listing = (await client.get("/api/budgets?month=2026-06-01", headers=auth_headers)).json()
+    assert any(b["category_id"] == str(cat.id) and float(b["amount"]) == 250.0 for b in listing)
+
+    # Re-applying for the same month updates instead of duplicating
+    resp2 = await client.post("/api/budgets/from-forecast", headers=auth_headers, json={
+        "month": "2026-06-15", "is_recurring": False,  # any day in month -> normalized
+        "items": [{"category_id": str(cat.id), "amount": "300.00"}],
+    })
+    assert resp2.status_code == 200
+    assert resp2.json() == {"created": 0, "updated": 1}
+    listing2 = (await client.get("/api/budgets?month=2026-06-01", headers=auth_headers)).json()
+    assert any(b["category_id"] == str(cat.id) and float(b["amount"]) == 300.0 for b in listing2)
