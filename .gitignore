@@ -6,6 +6,7 @@ secrets/
 .claude
 .mcp.json
 docs/plans/
+docs/
 tmp/
 docker-compose.override.yml
 
@@ -16,3 +17,4 @@ docker-compose.override.yml
 # downloaded ONNX embedding models, transaction attachments). User data
 # — never commit.
 backend/data/
+MCP-GUIA-DO-AGENTE.md
