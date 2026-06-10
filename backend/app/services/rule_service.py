@@ -877,6 +877,31 @@ async def _get_existing_rule_names_for_workspace(
     return {row[0] for row in result.all()}
 
 
+def _rule_sets_category(rule) -> bool:
+    return any((a or {}).get("op") == "set_category" for a in (rule.actions or []))
+
+
+async def get_matching_rules(
+    session: AsyncSession, workspace_id: uuid.UUID, transaction: Transaction
+) -> list[Rule]:
+    """Active category-setting rules whose conditions match this transaction.
+
+    Used by the UI to flag that a transaction is already covered by a rule
+    (so 'add description to a rule' is redundant)."""
+    result = await session.execute(
+        select(Rule)
+        .where(Rule.workspace_id == workspace_id, Rule.is_active == True)  # noqa: E712
+        .order_by(Rule.priority, Rule.id)
+    )
+    matches: list[Rule] = []
+    for rule in result.scalars().all():
+        if not _rule_sets_category(rule):
+            continue
+        if evaluate_conditions(rule.conditions_op, rule.conditions or [], transaction):
+            matches.append(rule)
+    return matches
+
+
 async def apply_rules_to_transaction(
     session: AsyncSession, user_id: uuid.UUID, transaction: Transaction,
     skip_category_rules: bool = False,

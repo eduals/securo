@@ -276,6 +276,7 @@
     "confirmDelete": "Czy na pewno usunąć tę transakcję?",
     "makeRecurring": "Ustaw jako cykliczną",
     "addToExistingRule": "Dodaj do istniejącej reguły",
+    "ruleAlreadyActive": "Aktywna reguła",
     "addToExistingRuleLabel": "Reguła",
     "selectRule": "Wybierz regułę",
     "addedToRule": "Dodano opis do reguły",
