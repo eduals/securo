@@ -16,7 +16,7 @@ from app.core.workspace_context import (
     current_writable_workspace,
 )
 from app.schemas.recurring_transaction import RecurringTransactionRead
-from app.schemas.transaction import BulkAddToGroupRequest, BulkCategorizeRequest, BulkTagsRequest, BulkUpdateCategoryByDescription, BulkUpdateResult, BulkUpdateTypeByDescription, CreateCounterpartRequest, LinkTransferRequest, SimilarCountResponse, TransactionCreate, TransactionRead, TransactionToRecurring, TransactionUpdate, TransferCreate, TransferRead
+from app.schemas.transaction import BulkAddToGroupRequest, BulkCategorizeRequest, BulkSetPayeeRequest, BulkTagsRequest, BulkUpdateCategoryByDescription, BulkUpdateResult, BulkUpdateTypeByDescription, BulkUpdateTypeRequest, CreateCounterpartRequest, LinkTransferRequest, SimilarCountResponse, TransactionCreate, TransactionRead, TransactionToRecurring, TransactionUpdate, TransferCreate, TransferRead
 from app.services import recurring_transaction_service, transaction_service
 from app.services.admin_service import get_credit_card_accounting_mode
 
@@ -201,6 +201,36 @@ async def bulk_categorize(
     count = await transaction_service.bulk_update_category(
         session, ctx.workspace.id, data.transaction_ids, data.category_id
     )
+    return {"updated": count}
+
+
+@router.patch("/bulk-update-type")
+async def bulk_update_type(
+    data: BulkUpdateTypeRequest,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        count = await transaction_service.bulk_update_type(
+            session, ctx.workspace.id, data.transaction_ids, data.type
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"updated": count}
+
+
+@router.patch("/bulk-set-payee")
+async def bulk_set_payee(
+    data: BulkSetPayeeRequest,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        count = await transaction_service.bulk_update_payee(
+            session, ctx.workspace.id, data.transaction_ids, data.payee_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return {"updated": count}
 
 

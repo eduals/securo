@@ -104,6 +104,16 @@ class BulkCategorizeRequest(BaseModel):
     category_id: Optional[uuid.UUID] = None
 
 
+class BulkUpdateTypeRequest(BaseModel):
+    transaction_ids: list[uuid.UUID]
+    type: str  # "debit" | "credit"
+
+
+class BulkSetPayeeRequest(BaseModel):
+    transaction_ids: list[uuid.UUID]
+    payee_id: Optional[uuid.UUID] = None
+
+
 class BulkAddToGroupRequest(BaseModel):
     transaction_ids: list[uuid.UUID]
     group_id: uuid.UUID

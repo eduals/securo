@@ -839,3 +839,69 @@ async def test_bulk_update_type_by_description_rejects_bad_type(
         headers=auth_headers, json={"type": "invalid"},
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_type_by_ids(
+    client: AsyncClient, auth_headers, test_account: Account, test_categories
+):
+    ids = []
+    for _ in range(3):
+        r = await client.post("/api/transactions", headers=auth_headers, json={
+            "account_id": str(test_account.id), "description": "BulkTypeX",
+            "amount": "10.00", "date": "2026-06-01", "type": "debit",
+        })
+        ids.append(r.json()["id"])
+    resp = await client.patch("/api/transactions/bulk-update-type", headers=auth_headers,
+                              json={"transaction_ids": ids, "type": "credit"})
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 3
+    listing = (await client.get("/api/transactions?q=BulkTypeX", headers=auth_headers)).json()["items"]
+    assert all(t["type"] == "credit" for t in listing if t["id"] in ids)
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_type_rejects_bad_type(
+    client: AsyncClient, auth_headers, test_account: Account, test_categories
+):
+    r = await client.post("/api/transactions", headers=auth_headers, json={
+        "account_id": str(test_account.id), "description": "BulkTypeY", "amount": "1.00",
+        "date": "2026-06-01", "type": "debit"})
+    resp = await client.patch("/api/transactions/bulk-update-type", headers=auth_headers,
+                              json={"transaction_ids": [r.json()["id"]], "type": "nope"})
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_bulk_set_payee_by_ids(
+    client: AsyncClient, auth_headers, test_account: Account, test_categories
+):
+    payee = (await client.post("/api/payees", headers=auth_headers, json={"name": "Mercado X"})).json()
+    ids = []
+    for _ in range(2):
+        r = await client.post("/api/transactions", headers=auth_headers, json={
+            "account_id": str(test_account.id), "description": "BulkPayeeZ", "amount": "5.00",
+            "date": "2026-06-01", "type": "debit"})
+        ids.append(r.json()["id"])
+    resp = await client.patch("/api/transactions/bulk-set-payee", headers=auth_headers,
+                              json={"transaction_ids": ids, "payee_id": payee["id"]})
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 2
+    listing = (await client.get("/api/transactions?q=BulkPayeeZ", headers=auth_headers)).json()["items"]
+    assert all(t["payee_id"] == payee["id"] for t in listing if t["id"] in ids)
+
+
+@pytest.mark.asyncio
+async def test_bulk_set_payee_clears_with_null(
+    client: AsyncClient, auth_headers, test_account: Account, test_categories
+):
+    payee = (await client.post("/api/payees", headers=auth_headers, json={"name": "Mercado W"})).json()
+    r = await client.post("/api/transactions", headers=auth_headers, json={
+        "account_id": str(test_account.id), "description": "BulkPayeeW", "amount": "5.00",
+        "date": "2026-06-01", "type": "debit", "payee_id": payee["id"]})
+    tid = r.json()["id"]
+    resp = await client.patch("/api/transactions/bulk-set-payee", headers=auth_headers,
+                              json={"transaction_ids": [tid], "payee_id": None})
+    assert resp.status_code == 200
+    got = (await client.get(f"/api/transactions/{tid}", headers=auth_headers)).json()
+    assert got["payee_id"] is None

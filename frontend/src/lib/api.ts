@@ -437,6 +437,20 @@ export const transactions = {
     })
     return data
   },
+  bulkUpdateType: async (transactionIds: string[], type: 'debit' | 'credit'): Promise<{ updated: number }> => {
+    const { data } = await api.patch('/transactions/bulk-update-type', {
+      transaction_ids: transactionIds,
+      type,
+    })
+    return data
+  },
+  bulkSetPayee: async (transactionIds: string[], payeeId: string | null): Promise<{ updated: number }> => {
+    const { data } = await api.patch('/transactions/bulk-set-payee', {
+      transaction_ids: transactionIds,
+      payee_id: payeeId,
+    })
+    return data
+  },
   bulkAddTags: async (transactionIds: string[], tags: string[]): Promise<{ updated: number }> => {
     const { data } = await api.patch('/transactions/bulk-add-tags', {
       transaction_ids: transactionIds,

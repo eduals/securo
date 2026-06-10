@@ -28,13 +28,14 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, Check, Copy, Download, HelpCircle, Info, MoreHorizontal, Paperclip, Users, X, EyeClosed, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, ArrowUpDown, Check, Copy, Download, HelpCircle, Info, MoreHorizontal, Paperclip, Store, Users, X, EyeClosed, SlidersHorizontal } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Transaction, Rule } from '@/types'
 import { RuleDialog, type RuleDialogInitialData } from '@/components/rule-dialog'
 import { PageHeader } from '@/components/page-header'
@@ -180,6 +181,9 @@ export default function TransactionsPage() {
   const [bulkCategory, setBulkCategory] = useState<string>('')
   const [bulkAddToGroupOpen, setBulkAddToGroupOpen] = useState(false)
   const [bulkTagInput, setBulkTagInput] = useState<string>('')
+  // Bulk "set payee" popover (search + scrollable list).
+  const [payeeSearch, setPayeeSearch] = useState('')
+  const [payeePopoverOpen, setPayeePopoverOpen] = useState(false)
   const [createRuleOpen, setCreateRuleOpen] = useState(false)
   const [createRuleInitialData, setCreateRuleInitialData] = useState<RuleDialogInitialData | undefined>(undefined)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null)
@@ -522,6 +526,33 @@ export default function TransactionsPage() {
       invalidateAfterTxMutation()
       setSelectedIds(new Set())
       setBulkCategory('')
+      toast.success(t('transactions.bulkSuccess', { count: result.updated }))
+    },
+    onError: (error) => {
+      toast.error(extractApiError(error))
+    },
+  })
+
+  const bulkUpdateTypeMutation = useMutation({
+    mutationFn: ({ ids, type }: { ids: string[]; type: 'debit' | 'credit' }) =>
+      transactions.bulkUpdateType(ids, type),
+    onSuccess: (result) => {
+      invalidateAfterTxMutation()
+      setSelectedIds(new Set())
+      toast.success(t('transactions.bulkSuccess', { count: result.updated }))
+    },
+    onError: (error) => {
+      toast.error(extractApiError(error))
+    },
+  })
+
+  const bulkSetPayeeMutation = useMutation({
+    mutationFn: ({ ids, payeeId }: { ids: string[]; payeeId: string | null }) =>
+      transactions.bulkSetPayee(ids, payeeId),
+    onSuccess: (result) => {
+      invalidateAfterTxMutation()
+      setSelectedIds(new Set())
+      setPayeeSearch('')
       toast.success(t('transactions.bulkSuccess', { count: result.updated }))
     },
     onError: (error) => {
@@ -1509,6 +1540,10 @@ export default function TransactionsPage() {
               </div>
             </div>
 
+            {/* Scrollable action strip — never wraps and never grows in
+                height; overflows horizontally on narrow screens. The count
+                pill and the close button stay pinned outside it. */}
+            <div className="flex items-stretch gap-1.5 flex-1 min-w-0 overflow-x-auto">
             <div className="w-px bg-border/60 self-stretch" />
 
             {/* Categorize — fires on selection, no separate Apply button */}
@@ -1528,6 +1563,87 @@ export default function TransactionsPage() {
               className="w-44 md:w-56 h-auto py-2 border-transparent bg-transparent hover:bg-muted/60 focus:bg-muted/60 focus-visible:ring-0"
               contentProps={{ side: 'top', sideOffset: 8 }}
             />
+
+            <div className="w-px bg-border/60 self-stretch" />
+
+            {/* Change type (debit/credit) in bulk */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={bulkUpdateTypeMutation.isPending}
+                  title={t('transactions.bulkChangeType')}
+                  className="h-8 px-3 shrink-0 text-sm"
+                >
+                  <ArrowUpDown size={15} className="lg:mr-1.5" />
+                  <span className="hidden lg:inline">{t('transactions.bulkChangeType')}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top" sideOffset={8}>
+                <DropdownMenuItem onSelect={() => bulkUpdateTypeMutation.mutate({ ids: Array.from(selectedIds), type: 'debit' })}>
+                  {t('transactions.expense')}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => bulkUpdateTypeMutation.mutate({ ids: Array.from(selectedIds), type: 'credit' })}>
+                  {t('transactions.income')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="w-px bg-border/60 self-stretch" />
+
+            {/* Set payee (beneficiary) in bulk — search + scrollable list */}
+            <Popover open={payeePopoverOpen} onOpenChange={(o) => { setPayeePopoverOpen(o); if (!o) setPayeeSearch('') }}>
+              <PopoverTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={bulkSetPayeeMutation.isPending}
+                  title={t('transactions.bulkSetPayee')}
+                  className="h-8 px-3 shrink-0 text-sm"
+                >
+                  <Store size={15} className="lg:mr-1.5" />
+                  <span className="hidden lg:inline">{t('transactions.bulkSetPayee')}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" side="top" sideOffset={8} className="w-64 p-2">
+                <input
+                  type="text"
+                  value={payeeSearch}
+                  onChange={(e) => setPayeeSearch(e.target.value)}
+                  placeholder={t('transactions.searchPayee')}
+                  className="w-full mb-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus-visible:ring-ring/30 focus-visible:ring-[2px]"
+                  autoFocus
+                />
+                <div className="max-h-56 overflow-y-auto flex flex-col">
+                  <button
+                    type="button"
+                    className="text-left text-sm rounded-md px-2.5 py-1.5 hover:bg-muted/60 text-muted-foreground"
+                    onClick={() => {
+                      bulkSetPayeeMutation.mutate({ ids: Array.from(selectedIds), payeeId: null })
+                      setPayeePopoverOpen(false)
+                    }}
+                  >
+                    {t('payees.noPayee')}
+                  </button>
+                  {(payeesList ?? [])
+                    .filter((p) => p.name.toLowerCase().includes(payeeSearch.trim().toLowerCase()))
+                    .map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="text-left text-sm rounded-md px-2.5 py-1.5 hover:bg-muted/60"
+                        onClick={() => {
+                          bulkSetPayeeMutation.mutate({ ids: Array.from(selectedIds), payeeId: p.id })
+                          setPayeePopoverOpen(false)
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                </div>
+              </PopoverContent>
+            </Popover>
 
             <div className="w-px bg-border/60 self-stretch" />
 
@@ -1614,11 +1730,11 @@ export default function TransactionsPage() {
               )
             })()}
 
-            <div className="ml-auto" />
+            </div>
 
             {/* Close */}
             <button
-              onClick={() => { setSelectedIds(new Set()); setBulkCategory(''); setBulkTagInput('') }}
+              onClick={() => { setSelectedIds(new Set()); setBulkCategory(''); setBulkTagInput(''); setPayeeSearch('') }}
               className="text-muted-foreground hover:text-foreground p-2 shrink-0 self-center rounded-lg hover:bg-muted/60"
               title={t('common.close', 'Close')}
             >
