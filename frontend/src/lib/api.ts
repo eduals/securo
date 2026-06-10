@@ -377,6 +377,26 @@ export const transactions = {
     })
     return data
   },
+  allIds: async (params: {
+    account_ids?: string[]
+    category_ids?: string[]
+    payee_id?: string
+    group_id?: string
+    type?: string
+    uncategorized?: boolean
+    from?: string
+    to?: string
+    min_amount?: number
+    max_amount?: number
+    q?: string
+    tags?: string[]
+  }): Promise<{ ids: string[]; total: number }> => {
+    const { data } = await api.get('/transactions/ids', {
+      params,
+      paramsSerializer: { indexes: null },
+    })
+    return data
+  },
   get: async (id: string): Promise<Transaction> => {
     const { data } = await api.get(`/transactions/${id}`)
     return data

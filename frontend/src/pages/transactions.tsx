@@ -28,7 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, ArrowUpDown, Check, Copy, Download, HelpCircle, Info, MoreHorizontal, Paperclip, Store, Users, X, EyeClosed, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, ArrowUpDown, Check, CheckCheck, Copy, Download, HelpCircle, Info, MoreHorizontal, Paperclip, Store, Users, X, EyeClosed, SlidersHorizontal } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -177,6 +177,9 @@ export default function TransactionsPage() {
   const [transferDialogOpen, setTransferDialogOpen] = useState(false)
   const [linkTransferDialogOpen, setLinkTransferDialogOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // When true, the selection logically covers ALL transactions matching the
+  // active filter (across pages), not just the loaded/checked IDs.
+  const [selectAllMatching, setSelectAllMatching] = useState(false)
   const grid = useTransactionsGridState()
   const [bulkCategory, setBulkCategory] = useState<string>('')
   const [bulkAddToGroupOpen, setBulkAddToGroupOpen] = useState(false)
@@ -287,6 +290,7 @@ export default function TransactionsPage() {
   // Clear selection on page/filter change
   useEffect(() => {
     setSelectedIds(new Set())
+    setSelectAllMatching(false)
     setBulkCategory('')
   }, [page, filterAccountIds, filterCategoryIds, filterUncategorized, filterPayee, filterType, filterFrom, filterTo, filterMinAmount, filterMaxAmount, searchQuery])
 
@@ -372,6 +376,32 @@ export default function TransactionsPage() {
     sort_dir: grid.sortDir,
     page,
   }
+  // Active filters reshaped for /transactions/ids (drives select-all-matching).
+  const idsFilterParams = {
+    account_ids: effectiveAccountIds.length ? effectiveAccountIds : undefined,
+    category_ids: filterCategoryIds.length ? filterCategoryIds : undefined,
+    payee_id: filterPayee || undefined,
+    group_id: filterGroupId || undefined,
+    type: filterType || undefined,
+    uncategorized: filterUncategorized || undefined,
+    from: filterFrom || undefined,
+    to: filterTo || undefined,
+    min_amount: filterMinAmount ? Number(filterMinAmount) : undefined,
+    max_amount: filterMaxAmount ? Number(filterMaxAmount) : undefined,
+    q: searchQuery || undefined,
+    tags: tagFilters.length ? tagFilters : undefined,
+  }
+
+  // IDs a bulk action should target: all matching the filter (when
+  // select-all-matching is on) or just the checked rows.
+  const getTargetIds = async (): Promise<string[]> => {
+    if (selectAllMatching) {
+      const { ids } = await transactions.allIds(idsFilterParams)
+      return ids
+    }
+    return Array.from(selectedIds)
+  }
+
   const ctxKey = JSON.stringify(ctxFilters) + ':' + (data?.total ?? '')
   useRegisterPageChatContext(
     {
@@ -520,11 +550,12 @@ export default function TransactionsPage() {
   })
 
   const bulkCategorizeMutation = useMutation({
-    mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string | null }) =>
-      transactions.bulkCategorize(ids, categoryId),
+    mutationFn: async ({ categoryId }: { categoryId: string | null }) =>
+      transactions.bulkCategorize(await getTargetIds(), categoryId),
     onSuccess: (result) => {
       invalidateAfterTxMutation()
       setSelectedIds(new Set())
+      setSelectAllMatching(false)
       setBulkCategory('')
       toast.success(t('transactions.bulkSuccess', { count: result.updated }))
     },
@@ -534,11 +565,12 @@ export default function TransactionsPage() {
   })
 
   const bulkUpdateTypeMutation = useMutation({
-    mutationFn: ({ ids, type }: { ids: string[]; type: 'debit' | 'credit' }) =>
-      transactions.bulkUpdateType(ids, type),
+    mutationFn: async ({ type }: { type: 'debit' | 'credit' }) =>
+      transactions.bulkUpdateType(await getTargetIds(), type),
     onSuccess: (result) => {
       invalidateAfterTxMutation()
       setSelectedIds(new Set())
+      setSelectAllMatching(false)
       toast.success(t('transactions.bulkSuccess', { count: result.updated }))
     },
     onError: (error) => {
@@ -547,11 +579,12 @@ export default function TransactionsPage() {
   })
 
   const bulkSetPayeeMutation = useMutation({
-    mutationFn: ({ ids, payeeId }: { ids: string[]; payeeId: string | null }) =>
-      transactions.bulkSetPayee(ids, payeeId),
+    mutationFn: async ({ payeeId }: { payeeId: string | null }) =>
+      transactions.bulkSetPayee(await getTargetIds(), payeeId),
     onSuccess: (result) => {
       invalidateAfterTxMutation()
       setSelectedIds(new Set())
+      setSelectAllMatching(false)
       setPayeeSearch('')
       toast.success(t('transactions.bulkSuccess', { count: result.updated }))
     },
@@ -561,11 +594,12 @@ export default function TransactionsPage() {
   })
 
   const bulkAddTagsMutation = useMutation({
-    mutationFn: ({ ids, tags }: { ids: string[]; tags: string[] }) =>
-      transactions.bulkAddTags(ids, tags),
+    mutationFn: async ({ tags }: { tags: string[] }) =>
+      transactions.bulkAddTags(await getTargetIds(), tags),
     onSuccess: (result) => {
       invalidateAfterTxMutation()
       setSelectedIds(new Set())
+      setSelectAllMatching(false)
       setBulkTagInput('')
       toast.success(t('transactions.bulkSuccess', { count: result.updated }))
     },
@@ -733,6 +767,15 @@ export default function TransactionsPage() {
     }
     return net
   }, [data?.items, selectedIds])
+
+  // Select-all-across-pages derivations.
+  const pageFullySelected = selectableItems.length > 0 && selectableItems.every(tx => selectedIds.has(tx.id))
+  const hasMoreThanPage = (data?.total ?? 0) > selectableItems.length
+  const canSelectAllMatching = pageFullySelected && hasMoreThanPage
+  const effectiveCount = selectAllMatching ? (data?.total ?? 0) : selectedIds.size
+  // When all matching are selected, the list summary already covers the whole
+  // filtered set, so use its net instead of the per-page sum.
+  const shownNet = selectAllMatching ? (data?.summary?.net ?? 0) : selectedNet
 
   // Resolve the currently-selected transactions into a valid debit/credit pair
   // for the "Link as transfer" action. Returns null if the pair is invalid
@@ -1518,7 +1561,7 @@ export default function TransactionsPage() {
                 count pill shows. */}
             <div className="flex items-center gap-2.5 pl-3 pr-4 whitespace-nowrap">
               <span className="inline-flex items-center justify-center size-6 rounded-full bg-primary/10 text-primary text-xs font-semibold shrink-0">
-                {selectedIds.size}
+                {effectiveCount}
               </span>
               <div className="hidden sm:flex flex-col leading-tight">
                 <span className="text-[11px] font-medium text-muted-foreground">
@@ -1526,12 +1569,12 @@ export default function TransactionsPage() {
                 </span>
                 <span
                   className={`text-sm font-bold tabular-nums ${
-                    selectedNet >= 0 ? 'text-emerald-600' : 'text-rose-500'
+                    shownNet >= 0 ? 'text-emerald-600' : 'text-rose-500'
                   }`}
                 >
                   {mask(
-                    `${selectedNet >= 0 ? '+' : '−'}${formatCurrency(
-                      Math.abs(selectedNet),
+                    `${shownNet >= 0 ? '+' : '−'}${formatCurrency(
+                      Math.abs(shownNet),
                       userCurrency,
                       locale,
                     )}`,
@@ -1539,6 +1582,26 @@ export default function TransactionsPage() {
                 </span>
               </div>
             </div>
+
+            {/* Select all across pages — pinned (shrink-0) so it is never
+                clipped by the scrollable strip and never hides the actions. */}
+            {(canSelectAllMatching || selectAllMatching) && (
+              <button
+                type="button"
+                onClick={() => setSelectAllMatching(v => !v)}
+                title={selectAllMatching ? t('transactions.selectOnlyPage') : t('transactions.selectAllMatching', { count: data?.total ?? 0 })}
+                className={`shrink-0 self-center inline-flex items-center gap-1.5 rounded-lg border px-2.5 h-8 text-xs font-medium whitespace-nowrap transition-colors ${
+                  selectAllMatching
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                }`}
+              >
+                <CheckCheck size={14} className="shrink-0" />
+                {selectAllMatching
+                  ? t('transactions.allSelectedShort', { count: data?.total ?? 0 })
+                  : t('transactions.selectAllShort', { count: data?.total ?? 0 })}
+              </button>
+            )}
 
             {/* Scrollable action strip — never wraps and never grows in
                 height; overflows horizontally on narrow screens. The count
@@ -1553,7 +1616,7 @@ export default function TransactionsPage() {
               onChange={(next) => {
                 setBulkCategory(next)
                 if (next) {
-                  bulkCategorizeMutation.mutate({ ids: Array.from(selectedIds), categoryId: next })
+                  bulkCategorizeMutation.mutate({ categoryId: next })
                 }
               }}
               categories={categoriesList ?? []}
@@ -1577,14 +1640,14 @@ export default function TransactionsPage() {
                   className="h-8 px-3 shrink-0 text-sm"
                 >
                   <ArrowUpDown size={15} className="lg:mr-1.5" />
-                  <span className="hidden lg:inline">{t('transactions.bulkChangeType')}</span>
+                  <span className="hidden lg:inline whitespace-nowrap">{t('transactions.bulkChangeType')}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="top" sideOffset={8}>
-                <DropdownMenuItem onSelect={() => bulkUpdateTypeMutation.mutate({ ids: Array.from(selectedIds), type: 'debit' })}>
+                <DropdownMenuItem onSelect={() => bulkUpdateTypeMutation.mutate({ type: 'debit' })}>
                   {t('transactions.expense')}
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => bulkUpdateTypeMutation.mutate({ ids: Array.from(selectedIds), type: 'credit' })}>
+                <DropdownMenuItem onSelect={() => bulkUpdateTypeMutation.mutate({ type: 'credit' })}>
                   {t('transactions.income')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -1603,7 +1666,7 @@ export default function TransactionsPage() {
                   className="h-8 px-3 shrink-0 text-sm"
                 >
                   <Store size={15} className="lg:mr-1.5" />
-                  <span className="hidden lg:inline">{t('transactions.bulkSetPayee')}</span>
+                  <span className="hidden lg:inline whitespace-nowrap">{t('transactions.bulkSetPayee')}</span>
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="start" side="top" sideOffset={8} className="w-64 p-2">
@@ -1620,7 +1683,7 @@ export default function TransactionsPage() {
                     type="button"
                     className="text-left text-sm rounded-md px-2.5 py-1.5 hover:bg-muted/60 text-muted-foreground"
                     onClick={() => {
-                      bulkSetPayeeMutation.mutate({ ids: Array.from(selectedIds), payeeId: null })
+                      bulkSetPayeeMutation.mutate({ payeeId: null })
                       setPayeePopoverOpen(false)
                     }}
                   >
@@ -1634,7 +1697,7 @@ export default function TransactionsPage() {
                         type="button"
                         className="text-left text-sm rounded-md px-2.5 py-1.5 hover:bg-muted/60"
                         onClick={() => {
-                          bulkSetPayeeMutation.mutate({ ids: Array.from(selectedIds), payeeId: p.id })
+                          bulkSetPayeeMutation.mutate({ payeeId: p.id })
                           setPayeePopoverOpen(false)
                         }}
                       >
@@ -1645,21 +1708,25 @@ export default function TransactionsPage() {
               </PopoverContent>
             </Popover>
 
-            <div className="w-px bg-border/60 self-stretch" />
-
             {/* Add to group — opens a dialog to configure share type and
-                members. Mirrors the per-tx splits options (issue #156). */}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={bulkAddToGroupMutation.isPending}
-              onClick={() => setBulkAddToGroupOpen(true)}
-              title={t('transactions.addToGroup')}
-              className="h-8 px-3 shrink-0 text-sm"
-            >
-              <Users size={15} className="lg:mr-1.5" />
-              <span className="hidden lg:inline">{t('transactions.addToGroup')}</span>
-            </Button>
+                members. Mirrors the per-tx splits options (issue #156).
+                Hidden in select-all-matching mode (per-small-selection only). */}
+            {!selectAllMatching && (
+              <>
+                <div className="w-px bg-border/60 self-stretch" />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={bulkAddToGroupMutation.isPending}
+                  onClick={() => setBulkAddToGroupOpen(true)}
+                  title={t('transactions.addToGroup')}
+                  className="h-8 px-3 shrink-0 text-sm"
+                >
+                  <Users size={15} className="xl:mr-1.5" />
+                  <span className="hidden xl:inline whitespace-nowrap">{t('transactions.addToGroup')}</span>
+                </Button>
+              </>
+            )}
 
             <div className="w-px bg-border/60 self-stretch" />
 
@@ -1675,7 +1742,7 @@ export default function TransactionsPage() {
                   if (e.key === 'Enter' && bulkTagInput.trim()) {
                     e.preventDefault()
                     const tagList = bulkTagInput.trim().split(/[\s,]+/).filter(Boolean)
-                    bulkAddTagsMutation.mutate({ ids: Array.from(selectedIds), tags: tagList })
+                    bulkAddTagsMutation.mutate({ tags: tagList })
                   }
                 }}
               />
@@ -1686,7 +1753,7 @@ export default function TransactionsPage() {
                 onClick={() => {
                   const tagList = bulkTagInput.trim().split(/[\s,]+/).filter(Boolean)
                   if (tagList.length === 0) return
-                  bulkAddTagsMutation.mutate({ ids: Array.from(selectedIds), tags: tagList })
+                  bulkAddTagsMutation.mutate({ tags: tagList })
                 }}
                 className="h-8 w-8 px-0 shrink-0"
                 title={t('transactions.bulkAddTags', 'Add tags')}
@@ -1695,25 +1762,29 @@ export default function TransactionsPage() {
               </Button>
             </div>
 
-            <div className="w-px bg-border/60 self-stretch" />
-
-            {/* Link transfer */}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!canOpenLinkDialog}
-              title={linkDisabledTooltip ?? t('transactions.linkAsTransfer')}
-              onClick={() => setLinkTransferDialogOpen(true)}
-              className="h-8 px-3 shrink-0 text-sm"
-            >
-              <ArrowLeftRight size={15} className="mr-1.5" />
-              <span className="hidden lg:inline">{t('transactions.linkAsTransfer')}</span>
-            </Button>
+            {/* Link transfer — needs exactly two rows, so hidden in
+                select-all-matching mode. */}
+            {!selectAllMatching && (
+              <>
+                <div className="w-px bg-border/60 self-stretch" />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!canOpenLinkDialog}
+                  title={linkDisabledTooltip ?? t('transactions.linkAsTransfer')}
+                  onClick={() => setLinkTransferDialogOpen(true)}
+                  className="h-8 px-3 shrink-0 text-sm"
+                >
+                  <ArrowLeftRight size={15} className="xl:mr-1.5" />
+                  <span className="hidden xl:inline whitespace-nowrap">{t('transactions.linkAsTransfer')}</span>
+                </Button>
+              </>
+            )}
 
             <div className="w-px bg-border/60 self-stretch" />
 
             {/* Create Rule — only when exactly one non-shared transaction is selected */}
-            {selectedIds.size === 1 && (() => {
+            {!selectAllMatching && selectedIds.size === 1 && (() => {
               const selectedTx = filteredItems.find(tx => selectedIds.has(tx.id))
               if (!selectedTx || selectedTx.is_shared) return null
               return (
@@ -1725,7 +1796,7 @@ export default function TransactionsPage() {
                   title={t('transactions.createRule')}
                 >
                   <SlidersHorizontal size={15} className="lg:mr-1.5" />
-                  <span className="hidden lg:inline">{t('transactions.createRule')}</span>
+                  <span className="hidden lg:inline whitespace-nowrap">{t('transactions.createRule')}</span>
                 </Button>
               )
             })()}
@@ -1734,7 +1805,7 @@ export default function TransactionsPage() {
 
             {/* Close */}
             <button
-              onClick={() => { setSelectedIds(new Set()); setBulkCategory(''); setBulkTagInput(''); setPayeeSearch('') }}
+              onClick={() => { setSelectedIds(new Set()); setSelectAllMatching(false); setBulkCategory(''); setBulkTagInput(''); setPayeeSearch('') }}
               className="text-muted-foreground hover:text-foreground p-2 shrink-0 self-center rounded-lg hover:bg-muted/60"
               title={t('common.close', 'Close')}
             >
