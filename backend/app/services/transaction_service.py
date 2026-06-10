@@ -1209,6 +1209,71 @@ async def bulk_update_category(
     return result.rowcount
 
 
+def _similar_desc_where(workspace_id: uuid.UUID, transaction_id: uuid.UUID, description: str):
+    """Filter for other transactions in the workspace whose description matches
+    (case-insensitive, trimmed), excluding the transaction itself."""
+    return (
+        Transaction.workspace_id == workspace_id,
+        Transaction.id != transaction_id,
+        func.lower(func.trim(Transaction.description)) == description.strip().lower(),
+    )
+
+
+async def count_similar_by_description(
+    session: AsyncSession, workspace_id: uuid.UUID, transaction_id: uuid.UUID
+) -> int:
+    """Count other transactions sharing this transaction's description."""
+    tx = await get_transaction(session, transaction_id, workspace_id)
+    if tx is None:
+        return 0
+    result = await session.execute(
+        select(func.count())
+        .select_from(Transaction)
+        .where(*_similar_desc_where(workspace_id, transaction_id, tx.description))
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def bulk_update_category_by_description(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    transaction_id: uuid.UUID,
+    category_id: Optional[uuid.UUID],
+) -> int:
+    """Apply category_id to every other transaction with the same description."""
+    tx = await get_transaction(session, transaction_id, workspace_id)
+    if tx is None:
+        return 0
+    result = await session.execute(
+        update(Transaction)
+        .where(*_similar_desc_where(workspace_id, transaction_id, tx.description))
+        .values(category_id=category_id)
+    )
+    await session.commit()
+    return result.rowcount
+
+
+async def bulk_update_type_by_description(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    transaction_id: uuid.UUID,
+    new_type: str,
+) -> int:
+    """Apply type (debit/credit) to every other transaction with the same description."""
+    if new_type not in ("debit", "credit"):
+        raise ValueError("type must be 'debit' or 'credit'")
+    tx = await get_transaction(session, transaction_id, workspace_id)
+    if tx is None:
+        return 0
+    result = await session.execute(
+        update(Transaction)
+        .where(*_similar_desc_where(workspace_id, transaction_id, tx.description))
+        .values(type=new_type)
+    )
+    await session.commit()
+    return result.rowcount
+
+
 _TAG_CHAR_CLASS = r"[\wÀ-ž-]"
 
 

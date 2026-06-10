@@ -177,6 +177,22 @@ class TransactionImportRequest(BaseModel):
     detect_duplicates: bool = True
 
 
+class SimilarCountResponse(BaseModel):
+    count: int
+
+
+class BulkUpdateCategoryByDescription(BaseModel):
+    category_id: Optional[uuid.UUID] = None
+
+
+class BulkUpdateTypeByDescription(BaseModel):
+    type: str  # "debit" | "credit"
+
+
+class BulkUpdateResult(BaseModel):
+    updated: int
+
+
 class TransactionToRecurring(BaseModel):
     """Request body for converting an existing transaction into a recurring
     rule. The transaction itself stands in for the first occurrence, so the

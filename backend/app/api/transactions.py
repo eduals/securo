@@ -16,7 +16,7 @@ from app.core.workspace_context import (
     current_writable_workspace,
 )
 from app.schemas.recurring_transaction import RecurringTransactionRead
-from app.schemas.transaction import BulkAddToGroupRequest, BulkCategorizeRequest, BulkTagsRequest, CreateCounterpartRequest, LinkTransferRequest, TransactionCreate, TransactionRead, TransactionToRecurring, TransactionUpdate, TransferCreate, TransferRead
+from app.schemas.transaction import BulkAddToGroupRequest, BulkCategorizeRequest, BulkTagsRequest, BulkUpdateCategoryByDescription, BulkUpdateResult, BulkUpdateTypeByDescription, CreateCounterpartRequest, LinkTransferRequest, SimilarCountResponse, TransactionCreate, TransactionRead, TransactionToRecurring, TransactionUpdate, TransferCreate, TransferRead
 from app.services import recurring_transaction_service, transaction_service
 from app.services.admin_service import get_credit_card_accounting_mode
 
@@ -448,3 +448,47 @@ async def transaction_to_recurring(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get("/{transaction_id}/similar-count", response_model=SimilarCountResponse)
+async def similar_count(
+    transaction_id: uuid.UUID,
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Count other transactions that share this one's description."""
+    n = await transaction_service.count_similar_by_description(
+        session, ctx.workspace.id, transaction_id
+    )
+    return SimilarCountResponse(count=n)
+
+
+@router.patch("/{transaction_id}/bulk-update-category-by-description", response_model=BulkUpdateResult)
+async def bulk_update_category_by_description(
+    transaction_id: uuid.UUID,
+    data: BulkUpdateCategoryByDescription,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Apply this transaction's category to all others with the same description."""
+    n = await transaction_service.bulk_update_category_by_description(
+        session, ctx.workspace.id, transaction_id, data.category_id
+    )
+    return BulkUpdateResult(updated=n)
+
+
+@router.patch("/{transaction_id}/bulk-update-type-by-description", response_model=BulkUpdateResult)
+async def bulk_update_type_by_description(
+    transaction_id: uuid.UUID,
+    data: BulkUpdateTypeByDescription,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Apply this transaction's type to all others with the same description."""
+    try:
+        n = await transaction_service.bulk_update_type_by_description(
+            session, ctx.workspace.id, transaction_id, data.type
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return BulkUpdateResult(updated=n)

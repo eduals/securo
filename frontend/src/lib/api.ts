@@ -406,6 +406,18 @@ export const transactions = {
     const { data } = await api.post(`/transactions/${id}/to-recurring`, payload)
     return data
   },
+  similarCount: async (id: string): Promise<{ count: number }> => {
+    const { data } = await api.get(`/transactions/${id}/similar-count`)
+    return data
+  },
+  applyCategoryToSimilar: async (id: string, categoryId: string | null): Promise<{ updated: number }> => {
+    const { data } = await api.patch(`/transactions/${id}/bulk-update-category-by-description`, { category_id: categoryId })
+    return data
+  },
+  applyTypeToSimilar: async (id: string, type: 'debit' | 'credit'): Promise<{ updated: number }> => {
+    const { data } = await api.patch(`/transactions/${id}/bulk-update-type-by-description`, { type })
+    return data
+  },
   createTransfer: async (transfer: {
     from_account_id: string
     to_account_id: string
