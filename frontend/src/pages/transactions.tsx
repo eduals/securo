@@ -41,6 +41,14 @@ import { PageHeader } from '@/components/page-header'
 import { CategoryIcon } from '@/components/category-icon'
 import { CategorySelect } from '@/components/category-select'
 import { TransactionDialog, extractApiError, type SaveAction } from '@/components/transaction-dialog'
+import { ApplyToSimilarDialog } from '@/components/apply-to-similar-dialog'
+
+type SimilarPrompt = {
+  txId: string
+  kind: 'category' | 'type'
+  value: string | null
+  count: number
+}
 import { TransactionsColumnPicker } from '@/components/transactions-column-picker'
 import { type ColumnDef, type ColumnId, useTransactionsGridState } from '@/components/transactions-grid-columns'
 import { TransferDialog } from '@/components/transfer-dialog'
@@ -120,6 +128,10 @@ export default function TransactionsPage() {
     useState<PendingTransferCategoryUpdate | null>(null)
   const [formResetKey, setFormResetKey] = useState(0)
   const [duplicateDraft, setDuplicateDraft] = useState<Partial<Transaction> | null>(null)
+  // Queue of "apply to same-description transactions?" prompts raised after an
+  // edit that changed the category and/or type.
+  const [similarQueue, setSimilarQueue] = useState<SimilarPrompt[]>([])
+  const [applyingSimilar, setApplyingSimilar] = useState(false)
   const [filterPayee, setFilterPayee] = useState<string>(searchParams.get('payee_id') ?? '')
   const [filterGroupId, setFilterGroupId] = useState<string>(searchParams.get('group_id') ?? '')
   const [filterType, setFilterType] = useState<string>(searchParams.get('type') ?? '')
@@ -447,7 +459,10 @@ export default function TransactionsPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, recurringData, ...data }: TransactionUpdatePayload & { id: string; recurringData?: { frequency: string; end_date?: string } }) => {
+    mutationFn: async ({ id, recurringData, prevCategoryId, prevType, ...data }: TransactionUpdatePayload & { id: string; recurringData?: { frequency: string; end_date?: string }; prevCategoryId?: string | null; prevType?: string }) => {
+      // prevCategoryId/prevType ride along only so onSuccess can detect a
+      // category/type change; they are not part of the update payload.
+      void prevCategoryId; void prevType
       const updated = await transactions.update(id, data)
       // When the recurring checkbox was ticked while editing, turn the saved
       // transaction into a recurring rule (skip_first, server reads the
@@ -460,12 +475,27 @@ export default function TransactionsPage() {
       }
       return updated
     },
-    onSuccess: () => {
+    onSuccess: async (updated, variables) => {
       invalidateAfterTxMutation()
       queryClient.invalidateQueries({ queryKey: ['recurring'] })
       setDialogOpen(false)
       setEditingTx(null)
       toast.success(t('transactions.updated'))
+      // After an edit, if the category or type changed, offer to apply the
+      // same change to every other transaction with the same description.
+      const catChanged = (variables.prevCategoryId ?? null) !== (updated.category_id ?? null)
+      const typeChanged = variables.prevType !== undefined && variables.prevType !== updated.type
+      if (!catChanged && !typeChanged) return
+      try {
+        const { count } = await transactions.similarCount(updated.id)
+        if (count <= 0) return
+        const queue: SimilarPrompt[] = []
+        if (typeChanged) queue.push({ txId: updated.id, kind: 'type', value: updated.type, count })
+        if (catChanged) queue.push({ txId: updated.id, kind: 'category', value: updated.category_id ?? null, count })
+        setSimilarQueue(queue)
+      } catch {
+        // Non-fatal: the edit already succeeded.
+      }
     },
     onError: (error) => {
       toast.error(extractApiError(error))
@@ -740,7 +770,13 @@ export default function TransactionsPage() {
       return
     }
 
-    updateMutation.mutate({ id: editingTx.id, recurringData, ...data })
+    updateMutation.mutate({
+      id: editingTx.id,
+      recurringData,
+      prevCategoryId: editingTx.category_id ?? null,
+      prevType: editingTx.type,
+      ...data,
+    })
   }
 
   // Open the Add Transaction dialog seeded from an existing row's
@@ -1661,6 +1697,33 @@ export default function TransactionsPage() {
         loading={createMutation.isPending || updateMutation.isPending || deleteMutation.isPending || unlinkTransferMutation.isPending}
         error={createMutation.error || updateMutation.error ? extractApiError(createMutation.error || updateMutation.error) : null}
         isSynced={editingTx?.source === 'sync'}
+      />
+
+      <ApplyToSimilarDialog
+        open={similarQueue.length > 0}
+        count={similarQueue[0]?.count ?? 0}
+        kind={similarQueue[0]?.kind ?? 'category'}
+        loading={applyingSimilar}
+        onClose={() => setSimilarQueue((q) => q.slice(1))}
+        onConfirm={async () => {
+          const prompt = similarQueue[0]
+          if (!prompt) return
+          setApplyingSimilar(true)
+          try {
+            if (prompt.kind === 'type') {
+              await transactions.applyTypeToSimilar(prompt.txId, prompt.value as 'debit' | 'credit')
+            } else {
+              await transactions.applyCategoryToSimilar(prompt.txId, prompt.value)
+            }
+            invalidateAfterTxMutation()
+            toast.success(t('transactions.applySimilarDone', { count: prompt.count }))
+          } catch (e) {
+            toast.error(extractApiError(e))
+          } finally {
+            setApplyingSimilar(false)
+            setSimilarQueue((q) => q.slice(1))
+          }
+        }}
       />
 
       <Dialog
