@@ -905,3 +905,38 @@ async def test_bulk_set_payee_clears_with_null(
     assert resp.status_code == 200
     got = (await client.get(f"/api/transactions/{tid}", headers=auth_headers)).json()
     assert got["payee_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_transaction_ids_returns_all_matching(
+    client: AsyncClient, auth_headers, test_account, test_categories
+):
+    cat = test_categories[0]
+    created = []
+    for i in range(3):
+        r = await client.post("/api/transactions", headers=auth_headers, json={
+            "account_id": str(test_account.id), "description": f"IDS {i}",
+            "amount": "5.00", "date": "2026-06-01", "type": "debit",
+            "category_id": str(cat.id),
+        })
+        created.append(r.json()["id"])
+
+    resp = await client.get(f"/api/transactions/ids?category_id={cat.id}", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 3
+    assert set(body["ids"]) == set(created)
+
+
+@pytest.mark.asyncio
+async def test_transaction_ids_respects_search_filter(
+    client: AsyncClient, auth_headers, test_account, test_categories
+):
+    for desc in ["AlphaIds", "BetaIds", "AlphaIds2"]:
+        await client.post("/api/transactions", headers=auth_headers, json={
+            "account_id": str(test_account.id), "description": desc,
+            "amount": "5.00", "date": "2026-06-01", "type": "debit",
+        })
+    resp = await client.get("/api/transactions/ids?q=AlphaIds", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 2

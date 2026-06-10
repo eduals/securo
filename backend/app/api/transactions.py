@@ -56,6 +56,13 @@ class PaginatedTransactions(BaseModel):
     summary: Optional[TransactionsSummary] = None
 
 
+class TransactionIdsResponse(BaseModel):
+    """All transaction IDs matching the active filters (no pagination).
+    Powers the 'select all across pages' bulk action."""
+    ids: list[uuid.UUID]
+    total: int
+
+
 def _merge_id_filters(
     single: Optional[uuid.UUID], many: Optional[List[uuid.UUID]]
 ) -> Optional[List[uuid.UUID]]:
@@ -191,6 +198,42 @@ async def export_transactions(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="transactions-{today}.csv"'},
     )
+
+
+@router.get("/ids", response_model=TransactionIdsResponse)
+async def list_transaction_ids(
+    account_id: Optional[uuid.UUID] = Query(None),
+    account_ids: Optional[List[uuid.UUID]] = Query(None),
+    category_id: Optional[uuid.UUID] = Query(None),
+    category_ids: Optional[List[uuid.UUID]] = Query(None),
+    payee_id: Optional[uuid.UUID] = Query(None),
+    from_date: Optional[date] = Query(None, alias="from"),
+    to_date: Optional[date] = Query(None, alias="to"),
+    group_id: Optional[uuid.UUID] = Query(None),
+    q: Optional[str] = Query(None),
+    uncategorized: bool = Query(False),
+    type: Optional[str] = Query(None),
+    tags: Optional[List[str]] = Query(None),
+    min_amount: Optional[float] = Query(None, ge=0),
+    max_amount: Optional[float] = Query(None, ge=0),
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """All transaction IDs matching the active filters (no pagination).
+    Powers the 'select all across pages' bulk action."""
+    accounting_mode = await get_credit_card_accounting_mode(session)
+    transactions, _, _ = await transaction_service.get_transactions(
+        session, ctx.workspace.id, ctx.user_id,
+        account_ids=_merge_id_filters(account_id, account_ids),
+        category_ids=_merge_id_filters(category_id, category_ids),
+        payee_id=payee_id, from_date=from_date, to_date=to_date,
+        search=q, uncategorized=uncategorized, txn_type=type, skip_pagination=True,
+        accounting_mode=accounting_mode, tags=tags, group_id=group_id,
+        min_amount=min_amount, max_amount=max_amount,
+    )
+    # Only workspace-owned, non-shared rows are bulk-editable; mirror that.
+    ids = [tx.id for tx in transactions if not getattr(tx, "is_shared", False)]
+    return TransactionIdsResponse(ids=ids, total=len(ids))
 
 
 @router.patch("/bulk-categorize")
