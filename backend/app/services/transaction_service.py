@@ -1209,6 +1209,46 @@ async def bulk_update_category(
     return result.rowcount
 
 
+async def bulk_update_type(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    transaction_ids: list[uuid.UUID],
+    new_type: str,
+) -> int:
+    """Set type (debit/credit) on the given transactions in this workspace."""
+    if new_type not in ("debit", "credit"):
+        raise ValueError("type must be 'debit' or 'credit'")
+    result = await session.execute(
+        update(Transaction)
+        .where(Transaction.id.in_(transaction_ids), Transaction.workspace_id == workspace_id)
+        .values(type=new_type)
+    )
+    await session.commit()
+    return result.rowcount
+
+
+async def bulk_update_payee(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    transaction_ids: list[uuid.UUID],
+    payee_id: Optional[uuid.UUID],
+) -> int:
+    """Set (or clear, when payee_id is None) the payee on the given transactions."""
+    if payee_id is not None:
+        owned = await session.execute(
+            select(Payee.id).where(Payee.id == payee_id, Payee.workspace_id == workspace_id)
+        )
+        if owned.scalar_one_or_none() is None:
+            raise ValueError("Payee not found")
+    result = await session.execute(
+        update(Transaction)
+        .where(Transaction.id.in_(transaction_ids), Transaction.workspace_id == workspace_id)
+        .values(payee_id=payee_id)
+    )
+    await session.commit()
+    return result.rowcount
+
+
 def _similar_desc_where(workspace_id: uuid.UUID, transaction_id: uuid.UUID, description: str):
     """Filter for other transactions in the workspace whose description matches
     (case-insensitive, trimmed), excluding the transaction itself."""
