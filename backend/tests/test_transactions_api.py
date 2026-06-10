@@ -756,3 +756,86 @@ async def test_list_transactions_summary_respects_filters(
     assert summary["income"] == pytest.approx(0.0)
     assert summary["expense"] == pytest.approx(25.5)
     assert summary["net"] == pytest.approx(-25.5)
+
+
+@pytest.mark.asyncio
+async def test_similar_count_matches_same_description_case_insensitive(
+    client: AsyncClient, auth_headers, test_account: Account, test_categories
+):
+    """similar-count returns the number of OTHER transactions with the same
+    description (case-insensitive), excluding the target itself."""
+    for desc in ["Uber", "uber", "UBER", "Padaria"]:
+        await client.post("/api/transactions", headers=auth_headers, json={
+            "account_id": str(test_account.id), "description": desc,
+            "amount": "10.00", "date": "2026-06-01", "type": "debit",
+        })
+    uber = (await client.get("/api/transactions?q=Uber", headers=auth_headers)).json()["items"][0]
+
+    resp = await client.get(f"/api/transactions/{uber['id']}/similar-count", headers=auth_headers)
+    assert resp.status_code == 200
+    # 3 'uber' rows in any case; excluding self -> 2 others
+    assert resp.json()["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_category_by_description(
+    client: AsyncClient, auth_headers, test_account: Account, test_categories
+):
+    cat_id = str(test_categories[0].id)
+    ids = []
+    for _ in range(3):
+        r = await client.post("/api/transactions", headers=auth_headers, json={
+            "account_id": str(test_account.id), "description": "Spotify",
+            "amount": "19.90", "date": "2026-06-01", "type": "debit",
+        })
+        ids.append(r.json()["id"])
+
+    resp = await client.patch(
+        f"/api/transactions/{ids[0]}/bulk-update-category-by-description",
+        headers=auth_headers, json={"category_id": cat_id},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 2  # the other two, excluding the target
+
+    listing = (await client.get("/api/transactions?q=Spotify", headers=auth_headers)).json()["items"]
+    categorized = [t for t in listing if t["category_id"] == cat_id]
+    assert len(categorized) == 2
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_type_by_description(
+    client: AsyncClient, auth_headers, test_account: Account, test_categories
+):
+    for _ in range(3):
+        await client.post("/api/transactions", headers=auth_headers, json={
+            "account_id": str(test_account.id), "description": "Reembolso",
+            "amount": "50.00", "date": "2026-06-01", "type": "debit",
+        })
+    target = (await client.get("/api/transactions?q=Reembolso", headers=auth_headers)).json()["items"][0]
+
+    resp = await client.patch(
+        f"/api/transactions/{target['id']}/bulk-update-type-by-description",
+        headers=auth_headers, json={"type": "credit"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 2
+
+    listing = (await client.get("/api/transactions?q=Reembolso", headers=auth_headers)).json()["items"]
+    credits = [t for t in listing if t["type"] == "credit"]
+    assert len(credits) == 2  # the two siblings; target stayed debit
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_type_by_description_rejects_bad_type(
+    client: AsyncClient, auth_headers, test_account: Account, test_categories
+):
+    r = await client.post("/api/transactions", headers=auth_headers, json={
+        "account_id": str(test_account.id), "description": "X",
+        "amount": "1.00", "date": "2026-06-01", "type": "debit",
+    })
+    tid = r.json()["id"]
+    resp = await client.patch(
+        f"/api/transactions/{tid}/bulk-update-type-by-description",
+        headers=auth_headers, json={"type": "invalid"},
+    )
+    assert resp.status_code == 400
