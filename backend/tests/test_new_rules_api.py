@@ -382,3 +382,64 @@ async def test_add_description_to_unknown_rule_404(client: AsyncClient, auth_hea
         headers=auth_headers,
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_matching_rules_returns_active_category_rule(
+    client: AsyncClient, auth_headers, test_account, test_categories
+):
+    cat_id = str(test_categories[0].id)
+    await client.post("/api/rules", json={
+        "name": "Streaming",
+        "conditions_op": "or",
+        "conditions": [{"field": "description", "op": "contains", "value": "Netflix"}],
+        "actions": [{"op": "set_category", "value": cat_id}],
+    }, headers=auth_headers)
+    tx = (await client.post("/api/transactions", json={
+        "account_id": str(test_account.id), "description": "NETFLIX.COM",
+        "amount": "39.90", "date": "2026-06-01", "type": "debit",
+    }, headers=auth_headers)).json()
+
+    resp = await client.get(f"/api/transactions/{tx['id']}/matching-rules", headers=auth_headers)
+    assert resp.status_code == 200
+    rules = resp.json()["rules"]
+    assert any(r["name"] == "Streaming" for r in rules)
+
+
+@pytest.mark.asyncio
+async def test_matching_rules_empty_when_no_category_rule(
+    client: AsyncClient, auth_headers, test_account, test_categories
+):
+    tx = (await client.post("/api/transactions", json={
+        "account_id": str(test_account.id), "description": "Algo Unico XYZ",
+        "amount": "10.00", "date": "2026-06-01", "type": "debit",
+    }, headers=auth_headers)).json()
+    resp = await client.get(f"/api/transactions/{tx['id']}/matching-rules", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["rules"] == []
+
+
+@pytest.mark.asyncio
+async def test_matching_rules_ignores_non_category_rules(
+    client: AsyncClient, auth_headers, test_account, test_categories
+):
+    await client.post("/api/rules", json={
+        "name": "NotesOnly",
+        "conditions_op": "or",
+        "conditions": [{"field": "description", "op": "contains", "value": "Spotify"}],
+        "actions": [{"op": "append_notes", "value": "#music"}],
+    }, headers=auth_headers)
+    tx = (await client.post("/api/transactions", json={
+        "account_id": str(test_account.id), "description": "SPOTIFY P1",
+        "amount": "19.90", "date": "2026-06-01", "type": "debit",
+    }, headers=auth_headers)).json()
+    resp = await client.get(f"/api/transactions/{tx['id']}/matching-rules", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["rules"] == []
+
+
+@pytest.mark.asyncio
+async def test_matching_rules_unknown_tx_404(client: AsyncClient, auth_headers):
+    import uuid as _uuid
+    resp = await client.get(f"/api/transactions/{_uuid.uuid4()}/matching-rules", headers=auth_headers)
+    assert resp.status_code == 404

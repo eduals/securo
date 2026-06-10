@@ -30,6 +30,15 @@ class AddDescriptionRequest(BaseModel):
     op: str = "contains"  # contains | equals | starts_with | ends_with
 
 
+class MatchingRule(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+class MatchingRulesResponse(BaseModel):
+    rules: list[MatchingRule]
+
+
 class RuleUpdate(BaseModel):
     name: Optional[str] = None
     conditions_op: Optional[str] = None

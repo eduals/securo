@@ -17,7 +17,8 @@ from app.core.workspace_context import (
 )
 from app.schemas.recurring_transaction import RecurringTransactionRead
 from app.schemas.transaction import BulkAddToGroupRequest, BulkCategorizeRequest, BulkSetPayeeRequest, BulkTagsRequest, BulkUpdateCategoryByDescription, BulkUpdateResult, BulkUpdateTypeByDescription, BulkUpdateTypeRequest, CreateCounterpartRequest, LinkTransferRequest, SimilarCountResponse, TransactionCreate, TransactionRead, TransactionToRecurring, TransactionUpdate, TransferCreate, TransferRead
-from app.services import recurring_transaction_service, transaction_service
+from app.schemas.rule import MatchingRule, MatchingRulesResponse
+from app.services import recurring_transaction_service, rule_service, transaction_service
 from app.services.admin_service import get_credit_card_accounting_mode
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -491,6 +492,20 @@ async def similar_count(
         session, ctx.workspace.id, transaction_id
     )
     return SimilarCountResponse(count=n)
+
+
+@router.get("/{transaction_id}/matching-rules", response_model=MatchingRulesResponse)
+async def matching_rules(
+    transaction_id: uuid.UUID,
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Active category-setting rules that already match this transaction."""
+    tx = await transaction_service.get_transaction(session, transaction_id, ctx.workspace.id)
+    if tx is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+    rules = await rule_service.get_matching_rules(session, ctx.workspace.id, tx)
+    return MatchingRulesResponse(rules=[MatchingRule(id=r.id, name=r.name) for r in rules])
 
 
 @router.patch("/{transaction_id}/bulk-update-category-by-description", response_model=BulkUpdateResult)
