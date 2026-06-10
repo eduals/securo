@@ -743,6 +743,10 @@ export const rules = {
     const { data } = await api.patch(`/rules/${id}`, rule)
     return data
   },
+  addDescription: async (ruleId: string, description: string): Promise<Rule> => {
+    const { data } = await api.post(`/rules/${ruleId}/add-description`, { description })
+    return data
+  },
   delete: async (id: string): Promise<void> => {
     await api.delete(`/rules/${id}`)
   },

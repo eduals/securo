@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
-import { currencies as currenciesApi, transactions as transactionsApi, settings as settingsApi, payees as payeesApi } from '@/lib/api'
+import { currencies as currenciesApi, transactions as transactionsApi, settings as settingsApi, payees as payeesApi, rules as rulesApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -333,6 +333,10 @@ function TransactionForm({
     queryKey: ['payees'],
     queryFn: payeesApi.list,
   })
+  const { data: rulesList } = useQuery({
+    queryKey: ['rules'],
+    queryFn: rulesApi.list,
+  })
   const seed = transaction ?? duplicateDraft
   const [description, setDescription] = useState(seed?.description ?? '')
   const [amount, setAmount] = useState(seed?.amount?.toString() ?? '')
@@ -355,6 +359,10 @@ function TransactionForm({
   const [isRecurring, setIsRecurring] = useState(false)
   const [frequency, setFrequency] = useState<'monthly' | 'weekly' | 'yearly'>('monthly')
   const [endDate, setEndDate] = useState('')
+  // Fold this description into an existing rule (so the rule's category etc.
+  // applies to matching transactions). Applied on save.
+  const [addToRule, setAddToRule] = useState(false)
+  const [selectedRuleId, setSelectedRuleId] = useState('')
   const queryClient = useQueryClient()
   // Inline payee creation straight from the transaction editor.
   const [creatingPayee, setCreatingPayee] = useState(false)
@@ -604,6 +612,16 @@ function TransactionForm({
         const recurringData = isRecurring
           ? { frequency, end_date: endDate || undefined }
           : undefined
+        // Fold this description into the chosen rule (idempotent server-side).
+        // Independent of the transaction save; surfaced with its own toast.
+        if (addToRule && selectedRuleId && description.trim()) {
+          rulesApi.addDescription(selectedRuleId, description.trim())
+            .then(() => {
+              queryClient.invalidateQueries({ queryKey: ['rules'] })
+              toast.success(t('transactions.addedToRule'))
+            })
+            .catch(() => toast.error(t('transactions.addToRuleError')))
+        }
         onSave(txData, recurringData, isCreating && pendingFiles.length > 0 ? pendingFiles : undefined, action)
       }}
       className={cn(
@@ -945,6 +963,38 @@ function TransactionForm({
                   className="w-full justify-start"
                 />
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Add this description to an existing rule (so the rule's category etc.
+          applies to matching transactions). Same box style as recurring;
+          applied on save. Only shown when at least one rule exists. */}
+      {!isSynced && (isCreating || transaction) && (rulesList?.length ?? 0) > 0 && (
+        <div className="space-y-3 border rounded-md p-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={addToRule}
+              onChange={(e) => setAddToRule(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <span className="text-sm font-medium">{t('transactions.addToExistingRule')}</span>
+          </label>
+          {addToRule && (
+            <div className="space-y-2 pt-1">
+              <Label>{t('transactions.addToExistingRuleLabel')}</Label>
+              <select
+                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus-visible:ring-ring/30 focus-visible:ring-[2px]"
+                value={selectedRuleId}
+                onChange={(e) => setSelectedRuleId(e.target.value)}
+              >
+                <option value="">{t('transactions.selectRule')}</option>
+                {(rulesList ?? []).map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
             </div>
           )}
         </div>
