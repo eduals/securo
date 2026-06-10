@@ -9,7 +9,7 @@ from app.core.workspace_context import (
     current_workspace,
     current_writable_workspace,
 )
-from app.schemas.rule import RuleCreate, RuleRead, RuleUpdate
+from app.schemas.rule import AddDescriptionRequest, RuleCreate, RuleRead, RuleUpdate
 from app.services import rule_service
 from app.services.rule_service import DuplicateRuleError
 
@@ -53,6 +53,23 @@ async def update_rule(
             status_code=status.HTTP_409_CONFLICT,
             detail="A rule with this name already exists",
         )
+    if not rule:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    return rule
+
+
+@router.post("/{rule_id}/add-description", response_model=RuleRead)
+async def add_rule_description(
+    rule_id: uuid.UUID,
+    data: AddDescriptionRequest,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Append a transaction's description to an existing rule so the rule's
+    actions (e.g. set_category) apply to matching transactions."""
+    rule = await rule_service.add_description_to_rule(
+        session, ctx.workspace.id, rule_id, data.description, data.op
+    )
     if not rule:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
     return rule

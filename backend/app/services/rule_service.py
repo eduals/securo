@@ -817,6 +817,47 @@ async def update_rule(
     return rule
 
 
+async def add_description_to_rule(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    description: str,
+    op: str = "contains",
+) -> Optional[Rule]:
+    """Append a description condition to an existing rule.
+
+    When every condition then targets the description field, the intent is
+    "match any of these descriptions", so conditions_op flips to "or".
+    Returns the rule, or None if not found. No-op (idempotent) when the
+    description is already present."""
+    rule = await get_rule(session, rule_id, workspace_id)
+    if not rule:
+        return None
+
+    value = description.strip()
+    if not value:
+        return rule
+
+    conditions = list(rule.conditions or [])
+    already = any(
+        c.get("field") == "description"
+        and str(c.get("value", "")).strip().lower() == value.lower()
+        for c in conditions
+    )
+    if not already:
+        conditions.append({"field": "description", "op": op, "value": value})
+
+    if conditions and all(c.get("field") == "description" for c in conditions):
+        rule.conditions_op = "or"
+
+    # Reassign (not in-place mutate) so SQLAlchemy tracks the JSON change,
+    # mirroring update_rule.
+    rule.conditions = conditions
+    await session.commit()
+    await session.refresh(rule)
+    return rule
+
+
 async def delete_rule(session: AsyncSession, rule_id: uuid.UUID, workspace_id: uuid.UUID) -> bool:
     rule = await get_rule(session, rule_id, workspace_id)
     if not rule:

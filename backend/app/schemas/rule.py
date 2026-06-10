@@ -25,6 +25,11 @@ class RuleCreate(BaseModel):
     is_active: bool = True
 
 
+class AddDescriptionRequest(BaseModel):
+    description: str
+    op: str = "contains"  # contains | equals | starts_with | ends_with
+
+
 class RuleUpdate(BaseModel):
     name: Optional[str] = None
     conditions_op: Optional[str] = None

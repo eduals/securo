@@ -323,3 +323,62 @@ async def test_rule_user_isolation(
     items = response.json()["items"]
     # Verify user1 still has transactions
     assert len(items) >= 5
+
+
+@pytest.mark.asyncio
+async def test_add_description_to_rule_appends_and_sets_or(
+    client: AsyncClient, auth_headers, test_categories
+):
+    """Adding a description appends a condition and flips conditions_op to 'or'
+    when every condition targets the description field."""
+    cat_id = str(test_categories[0].id)
+    rule = (await client.post("/api/rules", json={
+        "name": "Streaming",
+        "conditions_op": "and",
+        "conditions": [{"field": "description", "op": "contains", "value": "Netflix"}],
+        "actions": [{"op": "set_category", "value": cat_id}],
+    }, headers=auth_headers)).json()
+
+    resp = await client.post(
+        f"/api/rules/{rule['id']}/add-description",
+        json={"description": "Spotify"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    updated = resp.json()
+    descs = [c["value"] for c in updated["conditions"] if c["field"] == "description"]
+    assert "Netflix" in descs and "Spotify" in descs
+    assert updated["conditions_op"] == "or"
+
+
+@pytest.mark.asyncio
+async def test_add_description_to_rule_is_idempotent(
+    client: AsyncClient, auth_headers, test_categories
+):
+    cat_id = str(test_categories[0].id)
+    rule = (await client.post("/api/rules", json={
+        "name": "Food",
+        "conditions_op": "or",
+        "conditions": [{"field": "description", "op": "contains", "value": "iFood"}],
+        "actions": [{"op": "set_category", "value": cat_id}],
+    }, headers=auth_headers)).json()
+
+    # Same description (different case) should not duplicate.
+    resp = await client.post(
+        f"/api/rules/{rule['id']}/add-description",
+        json={"description": "IFOOD"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    descs = [c["value"] for c in resp.json()["conditions"] if c["field"] == "description"]
+    assert len(descs) == 1
+
+
+@pytest.mark.asyncio
+async def test_add_description_to_unknown_rule_404(client: AsyncClient, auth_headers):
+    resp = await client.post(
+        f"/api/rules/{uuid.uuid4()}/add-description",
+        json={"description": "X"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
-import { currencies as currenciesApi, transactions as transactionsApi, settings as settingsApi, payees as payeesApi } from '@/lib/api'
+import { currencies as currenciesApi, transactions as transactionsApi, settings as settingsApi, payees as payeesApi, rules as rulesApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { AlertTriangle, ChevronDown, ChevronLeft, Download, Eye, EyeClosed, Paperclip, Upload, X, FileText, Plus, Unlink, SlidersHorizontal, Repeat } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronLeft, Download, Eye, EyeClosed, Paperclip, Upload, X, FileText, Plus, Unlink, SlidersHorizontal } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,6 +56,10 @@ export function extractApiError(error: unknown): string {
   }
   return 'An unexpected error occurred'
 }
+
+// Sentinel value for the in-dropdown "+ Add payee" entry. Picking it opens
+// the inline create form rather than selecting a real payee.
+const CREATE_PAYEE_OPTION = '__create_payee__'
 
 function isImageType(contentType: string): boolean {
   return contentType.startsWith('image/')
@@ -329,6 +333,10 @@ function TransactionForm({
     queryKey: ['payees'],
     queryFn: payeesApi.list,
   })
+  const { data: rulesList } = useQuery({
+    queryKey: ['rules'],
+    queryFn: rulesApi.list,
+  })
   const seed = transaction ?? duplicateDraft
   const [description, setDescription] = useState(seed?.description ?? '')
   const [amount, setAmount] = useState(seed?.amount?.toString() ?? '')
@@ -351,31 +359,50 @@ function TransactionForm({
   const [isRecurring, setIsRecurring] = useState(false)
   const [frequency, setFrequency] = useState<'monthly' | 'weekly' | 'yearly'>('monthly')
   const [endDate, setEndDate] = useState('')
-  // Convert an existing transaction into a recurring rule (distinct from the
-  // create-flow recurring toggle above).
+  // Fold this description into an existing rule (so the rule's category etc.
+  // applies to matching transactions). Applied on save.
+  const [addToRule, setAddToRule] = useState(false)
+  const [selectedRuleId, setSelectedRuleId] = useState('')
   const queryClient = useQueryClient()
-  const [showToRecurring, setShowToRecurring] = useState(false)
-  const [convertFreq, setConvertFreq] = useState<'monthly' | 'weekly' | 'yearly'>('monthly')
-  const [convertEndDate, setConvertEndDate] = useState('')
-  const [converting, setConverting] = useState(false)
+  // Inline payee creation straight from the transaction editor.
+  const [creatingPayee, setCreatingPayee] = useState(false)
+  const [newPayeeName, setNewPayeeName] = useState('')
+  const [savingPayee, setSavingPayee] = useState(false)
 
-  const handleConvertToRecurring = async () => {
-    if (!transaction) return
-    setConverting(true)
+  const openCreatePayee = () => {
+    // Pre-fill with the raw payee (synced) or the description (manual).
+    setNewPayeeName(transaction?.payee || description || '')
+    setCreatingPayee(true)
+  }
+
+  const handlePayeeSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    // The "+ Add payee" entry is a sentinel option, not a real payee: it
+    // opens the inline create form instead of selecting a value.
+    if (e.target.value === CREATE_PAYEE_OPTION) {
+      openCreatePayee()
+      return
+    }
+    setPayeeId(e.target.value)
+  }
+
+  const handleCreatePayee = async () => {
+    const name = newPayeeName.trim()
+    if (!name) return
+    setSavingPayee(true)
     try {
-      await transactionsApi.toRecurring(transaction.id, {
-        frequency: convertFreq,
-        end_date: convertEndDate || null,
-      })
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
-      toast.success(t('transactions.convertedToRecurring'))
-      setShowToRecurring(false)
+      const created = await payeesApi.create({ name })
+      await queryClient.invalidateQueries({ queryKey: ['payees'] })
+      setPayeeId(created.id) // auto-select the new payee
+      setCreatingPayee(false)
+      setNewPayeeName('')
+      toast.success(t('payees.created'))
     } catch {
-      toast.error(t('transactions.convertToRecurringError'))
+      toast.error(t('payees.createError'))
     } finally {
-      setConverting(false)
+      setSavingPayee(false)
     }
   }
+
   // Optional split-with-group payload. `null` = leave splits as-is on
   // update, or no splits on create. The dedicated section component
   // owns its own UI state and surfaces a normalized payload here.
@@ -580,9 +607,21 @@ function TransactionForm({
               ...overridePayload,
               ...splitsPayload,
             } as Partial<Transaction>
-        const recurringData = isCreating && isRecurring
+        // Carried for both create and edit: when the recurring checkbox is
+        // on, the parent creates the recurring rule on save (skip_first).
+        const recurringData = isRecurring
           ? { frequency, end_date: endDate || undefined }
           : undefined
+        // Fold this description into the chosen rule (idempotent server-side).
+        // Independent of the transaction save; surfaced with its own toast.
+        if (addToRule && selectedRuleId && description.trim()) {
+          rulesApi.addDescription(selectedRuleId, description.trim())
+            .then(() => {
+              queryClient.invalidateQueries({ queryKey: ['rules'] })
+              toast.success(t('transactions.addedToRule'))
+            })
+            .catch(() => toast.error(t('transactions.addToRuleError')))
+        }
         onSave(txData, recurringData, isCreating && pendingFiles.length > 0 ? pendingFiles : undefined, action)
       }}
       className={cn(
@@ -758,14 +797,33 @@ function TransactionForm({
           <Label>{t('payees.payee')}</Label>
           <select
             className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus-visible:ring-ring/30 focus-visible:ring-[2px]"
-            value={payeeId}
-            onChange={(e) => setPayeeId(e.target.value)}
+            value={creatingPayee ? CREATE_PAYEE_OPTION : payeeId}
+            onChange={handlePayeeSelectChange}
           >
             <option value="">{t('payees.noPayee')}</option>
             {(payeesList ?? []).map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
+            <option value={CREATE_PAYEE_OPTION}>{t('payees.addNew')}</option>
           </select>
+          {creatingPayee && (
+            <div className="space-y-2 border rounded-md p-2">
+              <Input
+                value={newPayeeName}
+                onChange={(e) => setNewPayeeName(e.target.value)}
+                placeholder={t('payees.namePlaceholder')}
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button type="button" size="sm" onClick={handleCreatePayee} disabled={savingPayee || !newPayeeName.trim()}>
+                  {savingPayee ? t('common.loading') : t('common.save')}
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => { setCreatingPayee(false); setNewPayeeName('') }}>
+                  {t('common.cancel')}
+                </Button>
+              </div>
+            </div>
+          )}
           {isSynced && transaction?.payee && (
             <p className="text-xs text-muted-foreground">{t('payees.rawPayee')}: {transaction.payee}</p>
           )}
@@ -869,8 +927,9 @@ function TransactionForm({
         />
       )}
 
-      {/* Recurring toggle — only shown when creating non-synced */}
-      {isCreating && !isSynced && (
+      {/* Recurring toggle — shown below attachments in both create and edit
+          flows (non-synced). On save the parent creates the recurring rule. */}
+      {!isSynced && (isCreating || transaction) && (
         <div className="space-y-3 border rounded-md p-3">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -909,36 +968,35 @@ function TransactionForm({
         </div>
       )}
 
-      {/* Convert an existing transaction into a recurring rule. */}
-      {showToRecurring && transaction && (
+      {/* Add this description to an existing rule (so the rule's category etc.
+          applies to matching transactions). Same box style as recurring;
+          applied on save. Only shown when at least one rule exists. */}
+      {!isSynced && (isCreating || transaction) && (rulesList?.length ?? 0) > 0 && (
         <div className="space-y-3 border rounded-md p-3">
-          <p className="text-sm font-medium">{t('transactions.convertToRecurringTitle')}</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>{t('recurring.frequency')}</Label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={addToRule}
+              onChange={(e) => setAddToRule(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <span className="text-sm font-medium">{t('transactions.addToExistingRule')}</span>
+          </label>
+          {addToRule && (
+            <div className="space-y-2 pt-1">
+              <Label>{t('transactions.addToExistingRuleLabel')}</Label>
               <select
                 className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus-visible:ring-ring/30 focus-visible:ring-[2px]"
-                value={convertFreq}
-                onChange={(e) => setConvertFreq(e.target.value as 'monthly' | 'weekly' | 'yearly')}
+                value={selectedRuleId}
+                onChange={(e) => setSelectedRuleId(e.target.value)}
               >
-                <option value="monthly">{t('recurring.monthly')}</option>
-                <option value="weekly">{t('recurring.weekly')}</option>
-                <option value="yearly">{t('recurring.yearly')}</option>
+                <option value="">{t('transactions.selectRule')}</option>
+                {(rulesList ?? []).map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
               </select>
             </div>
-            <div className="space-y-2">
-              <Label>{t('recurring.endDate')}</Label>
-              <DatePickerInput
-                value={convertEndDate}
-                onChange={setConvertEndDate}
-                placeholder={t('recurring.endDate')}
-                className="w-full justify-start"
-              />
-            </div>
-          </div>
-          <Button type="button" onClick={handleConvertToRecurring} disabled={converting}>
-            {converting ? t('common.loading') : t('transactions.confirmConvertToRecurring')}
-          </Button>
+          )}
         </div>
       )}
 
@@ -946,9 +1004,12 @@ function TransactionForm({
 
       <DialogFooter className={cn(
         'shrink-0 border-t pt-4 mt-2',
-        (onDelete || seed?.id) ? 'flex justify-between sm:justify-between' : ''
+        // flex-wrap so a crowded edit-mode footer (delete / ignore / create
+        // rule / make recurring on the left) wraps instead of pushing the
+        // Save button out of view on narrow modals.
+        (onDelete || seed?.id) ? 'flex flex-wrap gap-2 justify-between sm:justify-between' : ''
       )}>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           {onDelete && (
             <Button type="button" variant="destructive" onClick={onDelete} disabled={loading}>
               {t('common.delete')}
@@ -977,18 +1038,6 @@ function TransactionForm({
             >
               <SlidersHorizontal size={16} />
               {t('transactions.createRule')}
-            </Button>
-          )}
-          {transaction && !isSynced && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowToRecurring((v) => !v)}
-              className="gap-1.5"
-              title={t('transactions.makeRecurring')}
-            >
-              <Repeat size={16} />
-              {t('transactions.makeRecurring')}
             </Button>
           )}
         </div>

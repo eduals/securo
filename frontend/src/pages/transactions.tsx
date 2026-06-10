@@ -447,10 +447,22 @@ export default function TransactionsPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...data }: TransactionUpdatePayload & { id: string }) =>
-      transactions.update(id, data),
+    mutationFn: async ({ id, recurringData, ...data }: TransactionUpdatePayload & { id: string; recurringData?: { frequency: string; end_date?: string } }) => {
+      const updated = await transactions.update(id, data)
+      // When the recurring checkbox was ticked while editing, turn the saved
+      // transaction into a recurring rule (skip_first, server reads the
+      // just-updated values).
+      if (recurringData) {
+        await transactions.toRecurring(id, {
+          frequency: recurringData.frequency as 'monthly' | 'weekly' | 'yearly',
+          end_date: recurringData.end_date || null,
+        })
+      }
+      return updated
+    },
     onSuccess: () => {
       invalidateAfterTxMutation()
+      queryClient.invalidateQueries({ queryKey: ['recurring'] })
       setDialogOpen(false)
       setEditingTx(null)
       toast.success(t('transactions.updated'))
@@ -728,7 +740,7 @@ export default function TransactionsPage() {
       return
     }
 
-    updateMutation.mutate({ id: editingTx.id, ...data })
+    updateMutation.mutate({ id: editingTx.id, recurringData, ...data })
   }
 
   // Open the Add Transaction dialog seeded from an existing row's
