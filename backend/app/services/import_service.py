@@ -21,7 +21,7 @@ from app.models.transaction import Transaction
 from app.schemas.transaction import TransactionImport
 from app.services.credit_card_service import apply_effective_date
 from app.services.rule_engine import apply_rule_actions, evaluate_conditions
-from app.services.rule_service import apply_rules_to_transaction
+from app.services.rule_service import apply_interpretation_to_transaction, apply_rules_to_transaction
 from app.services.fx_rate_service import stamp_primary_amount
 from app.services.payee_service import get_or_create_payee
 
@@ -446,21 +446,30 @@ def parse_csv(
             except Exception:
                 continue  # Skip invalid amounts
 
-            if flip_amount:
-                amount = -amount
-
             if type_col and row.get(type_col, '').strip() in ('credit', 'debit'):
                 txn_type = row[type_col].strip()
             else:
                 txn_type = "credit" if amount > 0 else "debit"
             amount = abs(amount)
 
+        # "Inverter valores (trocar entrada/saída)": swap the resolved
+        # credit/debit. Works even when the CSV has an explicit type column —
+        # e.g. a credit-card statement whose charges arrive as `credit` is then
+        # stored in the native convention (charge = debit). Covers both the
+        # split inflow/outflow path and the single-amount path.
+        if flip_amount:
+            txn_type = "debit" if txn_type == "credit" else "credit"
+
         # Extract optional category, currency and fx_rate from CSV columns
         category_name = row[category_col].strip() if category_col and row.get(category_col) else None
         txn_currency = None
         txn_fx_rate = None
         if currency_col and row.get(currency_col):
-            txn_currency = row[currency_col].strip().upper() or None
+            # Only accept a plausible 3-letter ISO code. A mis-mapped column
+            # (e.g. one holding amounts like "11.49") must NOT leak into the
+            # varchar(3) currency field — drop it and fall back later.
+            candidate = row[currency_col].strip().upper()
+            txn_currency = candidate if (len(candidate) == 3 and candidate.isalpha()) else None
         if fx_rate_col and row.get(fx_rate_col):
             fx_str = normalize_amount(row[fx_rate_col].strip())
             if fx_str:
@@ -584,8 +593,15 @@ async def import_transactions(
     should_detect_duplicates = detect_duplicates if effective_format == "csv" else True
 
     for txn_data in included:
-        # Resolve currency: CSV value > account currency
-        txn_currency = txn_data.currency or account_currency
+        # Resolve currency: CSV value > account currency. Guard against junk
+        # (e.g. a mis-mapped amount column) that would overflow the 3-char
+        # currency column and 500 the whole import.
+        raw_currency = (txn_data.currency or "").strip().upper()
+        txn_currency = (
+            raw_currency
+            if (len(raw_currency) == 3 and raw_currency.isalpha())
+            else account_currency
+        )
 
         if should_detect_duplicates:
             # Duplicate detection: use external_id when available (OFX FITID),
@@ -657,6 +673,9 @@ async def import_transactions(
         await session.flush()
 
         await apply_rules_to_transaction(session, user_id, transaction, skip_category_rules=txn_data.force_uncategorized)
+        # Interpretation runs AFTER categorization so it can condition on the
+        # category the categorization rules just set.
+        await apply_interpretation_to_transaction(session, transaction)
 
         # Only auto-convert if no fx_rate was provided by the CSV
         if not txn_data.fx_rate:

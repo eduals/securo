@@ -176,6 +176,27 @@ RULE_PACKS = {
                 {"field": "description", "op": "contains", "value": "ALURA"},
             ], "actions": [{"op": "set_category", "value": "education"}], "priority": 10},
         ],
+        # Financial interpretation rules (kind='interpretation'). Conditions use
+        # virtual fields (account_type / category) + description; actions set
+        # financial_type/affects_reports. Seeded workspace-scoped on install.
+        "interpretation_rules": [
+            # Paying the card bill from checking is not a new expense — it
+            # settles charges already counted. Neutralize it.
+            {"name": "Pagamento de fatura (neutro)", "conditions_op": "or", "conditions": [
+                {"field": "description", "op": "contains", "value": "PAGAMENTO DE FATURA"},
+                {"field": "description", "op": "contains", "value": "PAGAMENTO RECEBIDO"},
+                {"field": "description", "op": "contains", "value": "PGTO DEBITO AUTOMATICO FATURA"},
+            ], "actions": [{"op": "set_transfer"}], "priority": 5},
+            # Internal transfers between own accounts.
+            {"name": "Transferência interna (neutro)", "conditions_op": "or", "conditions": [
+                {"field": "category", "op": "equals", "value": "Transferência"},
+            ], "actions": [{"op": "set_transfer"}], "priority": 10},
+            # Technical reversals/adjustments shouldn't pollute income.
+            {"name": "Estorno / ajuste técnico", "conditions_op": "or", "conditions": [
+                {"field": "description", "op": "contains", "value": "ESTORNO"},
+                {"field": "description", "op": "contains", "value": "AJUSTE"},
+            ], "actions": [{"op": "set_financial_type", "value": "adjustment"}, {"op": "set_affects_reports", "value": False}], "priority": 10},
+        ],
     },
     "US": {
         "name": "United States",
@@ -691,6 +712,7 @@ async def install_rule_pack(
     pack_code: str,
     lang: str = "pt-BR",
     create_missing_categories: bool = False,
+    workspace_id: Optional[uuid.UUID] = None,
 ) -> RulePackInstallResult:
     """Install a country-specific rule pack for a user. Skips rules whose name already exists.
 
@@ -735,6 +757,28 @@ async def install_rule_pack(
         rules.append(rule)
 
     await session.commit()
+
+    # Seed the pack's INTERPRETATION rules (workspace-scoped, kind=
+    # 'interpretation') and apply them retroactively so existing transactions
+    # are reinterpreted immediately. Requires workspace_id (apply filters by it).
+    if workspace_id is not None:
+        for rd in pack.get("interpretation_rules", []):
+            if rd["name"] in existing_names:
+                continue
+            session.add(Rule(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                name=rd["name"],
+                conditions_op=rd.get("conditions_op", "and"),
+                conditions=rd["conditions"],
+                actions=rd["actions"],
+                priority=rd.get("priority", 0),
+                is_active=True,
+                kind="interpretation",
+            ))
+        await session.commit()
+        await reapply_interpretation(session, workspace_id)
+
     return RulePackInstallResult(rules, unresolved, categories_created)
 
 
@@ -748,10 +792,12 @@ async def get_installed_packs(session: AsyncSession, user_id: uuid.UUID) -> dict
     return result
 
 
-async def get_rules(session: AsyncSession, workspace_id: uuid.UUID) -> list[Rule]:
+async def get_rules(
+    session: AsyncSession, workspace_id: uuid.UUID, kind: str = "categorization"
+) -> list[Rule]:
     result = await session.execute(
         select(Rule)
-        .where(Rule.workspace_id == workspace_id)
+        .where(Rule.workspace_id == workspace_id, Rule.kind == kind)
         .order_by(Rule.priority, Rule.id)
     )
     return list(result.scalars().all())
@@ -783,6 +829,7 @@ async def create_rule(
         actions=[a.model_dump() for a in data.actions],
         priority=data.priority,
         is_active=data.is_active,
+        kind=getattr(data, "kind", "categorization"),
     )
     session.add(rule)
     await session.commit()
@@ -890,7 +937,7 @@ async def get_matching_rules(
     (so 'add description to a rule' is redundant)."""
     result = await session.execute(
         select(Rule)
-        .where(Rule.workspace_id == workspace_id, Rule.is_active == True)  # noqa: E712
+        .where(Rule.workspace_id == workspace_id, Rule.is_active == True, Rule.kind == "categorization")  # noqa: E712
         .order_by(Rule.priority, Rule.id)
     )
     matches: list[Rule] = []
@@ -918,7 +965,7 @@ async def apply_rules_to_transaction(
         rule_filter = Rule.workspace_id == transaction.workspace_id
     result = await session.execute(
         select(Rule)
-        .where(rule_filter, Rule.is_active == True)
+        .where(rule_filter, Rule.is_active == True, Rule.kind == "categorization")
         .order_by(Rule.priority, Rule.id)
     )
     rules = result.scalars().all()
@@ -930,6 +977,96 @@ async def apply_rules_to_transaction(
         actions = rule.actions or []
         if evaluate_conditions(rule.conditions_op, conditions, transaction):
             category_set = apply_rule_actions(actions, transaction, category_set)
+
+
+async def _interpretation_context(session: AsyncSession, transaction: "Transaction") -> dict:
+    """Build the virtual-field context (account_type, category[_name]) for
+    interpretation rules, loading the related objects explicitly so the engine
+    never lazy-loads in async."""
+    from app.models.account import Account
+
+    account_type = None
+    if getattr(transaction, "account_id", None) is not None:
+        acct = await session.get(Account, transaction.account_id)
+        account_type = acct.type if acct else None
+    category_name = None
+    if getattr(transaction, "category_id", None) is not None:
+        cat = await session.get(Category, transaction.category_id)
+        category_name = cat.name if cat else None
+    return {
+        "account_type": account_type,
+        "category": category_name,
+        "category_name": category_name,
+    }
+
+
+async def apply_interpretation_to_transaction(
+    session: AsyncSession, transaction: "Transaction"
+) -> None:
+    """Apply active interpretation rules (kind='interpretation') in priority
+    order, setting financial_type/affects_reports in-place. Commits nothing.
+    Skips transactions whose interpretation was manually locked."""
+    if getattr(transaction, "interpretation_locked", False):
+        return
+    ws_id = getattr(transaction, "workspace_id", None)
+    if ws_id is None:
+        return
+    result = await session.execute(
+        select(Rule)
+        .where(
+            Rule.workspace_id == ws_id,
+            Rule.is_active == True,
+            Rule.kind == "interpretation",
+        )
+        .order_by(Rule.priority, Rule.id)
+    )
+    rules = result.scalars().all()
+    if not rules:
+        return
+    context = await _interpretation_context(session, transaction)
+    for rule in rules:
+        conditions = rule.conditions or []
+        actions = rule.actions or []
+        if evaluate_conditions(rule.conditions_op, conditions, transaction, context):
+            apply_rule_actions(actions, transaction, False)
+
+
+async def reapply_interpretation(session: AsyncSession, workspace_id: uuid.UUID) -> int:
+    """Recompute financial_type/affects_reports for all workspace transactions
+    from the current interpretation rules. Resets non-locked rows to NULL first
+    (so removed rules stop applying), then re-applies. Returns count touched."""
+    rules_result = await session.execute(
+        select(Rule)
+        .where(
+            Rule.workspace_id == workspace_id,
+            Rule.is_active == True,
+            Rule.kind == "interpretation",
+        )
+        .order_by(Rule.priority, Rule.id)
+    )
+    rules = list(rules_result.scalars().all())
+
+    tx_result = await session.execute(
+        select(Transaction).where(
+            Transaction.workspace_id == workspace_id,
+            Transaction.interpretation_locked == False,
+        )
+    )
+    transactions = tx_result.scalars().all()
+    count = 0
+    for tx in transactions:
+        before = (tx.financial_type, tx.affects_reports)
+        tx.financial_type = None
+        tx.affects_reports = None
+        if rules:
+            context = await _interpretation_context(session, tx)
+            for rule in rules:
+                if evaluate_conditions(rule.conditions_op, rule.conditions or [], tx, context):
+                    apply_rule_actions(rule.actions or [], tx, False)
+        if (tx.financial_type, tx.affects_reports) != before:
+            count += 1
+    await session.commit()
+    return count
 
 
 async def apply_single_rule(
@@ -958,14 +1095,26 @@ async def apply_single_rule(
 
     conditions = rule.conditions or []
     actions = rule.actions or []
+    is_interp = rule.kind == "interpretation"
 
     count = 0
     for tx in transactions:
-        if not evaluate_conditions(rule.conditions_op, conditions, tx):
+        # Interpretation rules: respect manual locks and condition on virtual
+        # fields (account_type/category) via an explicit context.
+        if is_interp and getattr(tx, "interpretation_locked", False):
             continue
-        before = (tx.category_id, tx.payee_id, tx.notes, tx.is_ignored)
-        apply_rule_actions(actions, tx, category_already_set=tx.category_id is not None)
-        if before != (tx.category_id, tx.payee_id, tx.notes, tx.is_ignored):
+        context = await _interpretation_context(session, tx) if is_interp else None
+        if not evaluate_conditions(rule.conditions_op, conditions, tx, context):
+            continue
+        if is_interp:
+            before = (tx.financial_type, tx.affects_reports)
+            apply_rule_actions(actions, tx, False)
+            after = (tx.financial_type, tx.affects_reports)
+        else:
+            before = (tx.category_id, tx.payee_id, tx.notes, tx.is_ignored)
+            apply_rule_actions(actions, tx, category_already_set=tx.category_id is not None)
+            after = (tx.category_id, tx.payee_id, tx.notes, tx.is_ignored)
+        if before != after:
             count += 1
 
     await session.commit()
@@ -990,7 +1139,7 @@ async def apply_all_rules(session: AsyncSession, workspace_id: uuid.UUID) -> int
 
     rules_result = await session.execute(
         select(Rule)
-        .where(Rule.workspace_id == workspace_id, Rule.is_active == True)
+        .where(Rule.workspace_id == workspace_id, Rule.is_active == True, Rule.kind == "categorization")
         .order_by(Rule.priority, Rule.id)
     )
     rules = rules_result.scalars().all()

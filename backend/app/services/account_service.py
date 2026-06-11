@@ -13,6 +13,7 @@ from app.models.credit_card_bill import CreditCardBill
 from app.models.transaction import Transaction
 from app.schemas.account import AccountCreate, AccountUpdate
 from app.services._query_filters import counts_as_pnl
+from app.services.financial_interpretation import is_expense_expr, is_income_expr
 from app.services.credit_card_service import apply_effective_date, compute_available_credit, get_cycle_dates
 from app.models.category import Category
 
@@ -699,7 +700,7 @@ async def get_account_summary(
     income_result = await session.execute(
         _scope(select(func.coalesce(func.sum(effective_amount), 0)).where(
             Transaction.account_id == account_id,
-            Transaction.type == "credit",
+            is_income_expr(),
             Transaction.source != "opening_balance",
             counts_as_pnl(),
         ))
@@ -727,7 +728,7 @@ async def get_account_summary(
         expenses_result = await session.execute(
             _scope(select(func.coalesce(func.sum(func.abs(effective_amount)), 0)).where(
                 Transaction.account_id == account_id,
-                Transaction.type == "debit",
+                is_expense_expr(),
                 counts_as_pnl(),
             ))
         )

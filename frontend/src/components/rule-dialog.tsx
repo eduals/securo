@@ -47,7 +47,7 @@ const NUMERIC_OPS = [
 function getOpsForField(field: string) {
   if (field === 'amount' || field === 'date') return NUMERIC_OPS
   if (field === 'type') return [{ value: 'equals', label: 'rules.opIs' }]
-  if (field === 'payee_id' || field === 'account_id') return [
+  if (field === 'payee_id' || field === 'account_id' || field === 'category') return [
     { value: 'equals', label: 'rules.opIs' },
     { value: 'not_equals', label: 'rules.opIsNot' },
   ]
@@ -61,7 +61,7 @@ export interface RuleDialogInitialData {
 }
 
 export function RuleDialog({
-  open, onClose, rule, categories, categoryGroups, accounts, payees, onSave, loading, initialData,
+  open, onClose, rule, categories, categoryGroups, accounts, payees, onSave, loading, initialData, kind = 'categorization',
 }: {
   open: boolean
   onClose: () => void
@@ -73,11 +73,22 @@ export function RuleDialog({
   onSave: (data: Partial<Rule>) => void
   loading: boolean
   initialData?: RuleDialogInitialData
+  kind?: 'categorization' | 'interpretation'
 }) {
   const { t } = useTranslation()
+  const isInterp = kind === 'interpretation'
+
+  // Interpretation rules condition on the resolved category (the user's chosen
+  // design) in addition to the standard fields.
+  const conditionFields = isInterp
+    ? [...CONDITION_FIELDS, { value: 'category', label: 'rules.fieldCategory' } as const]
+    : CONDITION_FIELDS
+  const fallbackAction: RuleAction = isInterp
+    ? { op: 'set_transfer', value: null }
+    : { op: 'set_category', value: '' }
 
   const defaultConditions: RuleCondition[] = initialData?.conditions ?? rule?.conditions as RuleCondition[] ?? [{ field: 'description', op: 'contains', value: '' }]
-  const defaultActions: RuleAction[] = initialData?.actions ?? rule?.actions as RuleAction[] ?? [{ op: 'set_category', value: '' }]
+  const defaultActions: RuleAction[] = initialData?.actions ?? rule?.actions as RuleAction[] ?? [fallbackAction]
 
   const [name, setName] = useState(initialData?.name ?? rule?.name ?? '')
   const [conditionsOp, setConditionsOp] = useState<'and' | 'or'>(rule?.conditions_op ?? 'and')
@@ -85,7 +96,7 @@ export function RuleDialog({
     defaultConditions.length ? defaultConditions : [{ field: 'description', op: 'contains', value: '' }]
   )
   const [actions, setActions] = useState<RuleAction[]>(
-    defaultActions.length ? defaultActions : [{ op: 'set_category', value: '' }]
+    defaultActions.length ? defaultActions : [fallbackAction]
   )
   const [priority, setPriority] = useState(rule?.priority ?? 0)
   const [isActive, setIsActive] = useState(rule?.is_active ?? true)
@@ -104,11 +115,18 @@ export function RuleDialog({
     setConditions(prev => [...prev, { field: 'description', op: 'contains', value: '' }])
   }
 
+  function defaultValueForOp(op: string): RuleAction['value'] {
+    if (op === 'set_financial_type') return 'expense'
+    if (op === 'set_affects_reports') return 'true'
+    if (op === 'set_transfer') return null
+    return ''
+  }
+
   function updateAction(i: number, field: keyof RuleAction, val: string) {
     setActions(prev => prev.map((a, idx) => {
       if (idx !== i) return a
       const next = { ...a, [field]: val }
-      if (field === 'op') next.value = ''
+      if (field === 'op') next.value = defaultValueForOp(val)
       return next
     }))
   }
@@ -118,19 +136,30 @@ export function RuleDialog({
   }
 
   function addAction() {
-    setActions(prev => [...prev, { op: 'set_category', value: '' }])
+    setActions(prev => [...prev, { ...fallbackAction }])
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    onSave({ name, conditions_op: conditionsOp, conditions, actions, priority, is_active: isActive })
+    // Normalize interpretation action values: set_affects_reports must be a
+    // real boolean; set_transfer carries no value.
+    const normalizedActions = actions.map(a => {
+      if (a.op === 'set_affects_reports') return { ...a, value: a.value === true || a.value === 'true' }
+      if (a.op === 'set_transfer') return { op: 'set_transfer', value: null }
+      return a
+    })
+    onSave({ name, conditions_op: conditionsOp, conditions, actions: normalizedActions, priority, is_active: isActive, kind })
   }
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
-          <DialogTitle>{rule ? t('rules.editRule') : t('rules.newRule')}</DialogTitle>
+          <DialogTitle>
+            {isInterp
+              ? (rule ? t('rules.editInterpretation') : t('rules.newInterpretation'))
+              : (rule ? t('rules.editRule') : t('rules.newRule'))}
+          </DialogTitle>
         </DialogHeader>
         <form key={rule?.id ?? 'new'} onSubmit={handleSubmit} className="space-y-5">
           {/* Name + Priority */}
@@ -173,7 +202,7 @@ export function RuleDialog({
                     value={cond.field}
                     onChange={(e) => updateCondition(i, 'field', e.target.value)}
                   >
-                    {CONDITION_FIELDS.map(f => (
+                    {conditionFields.map(f => (
                       <option key={f.value} value={f.value}>{t(f.label)}</option>
                     ))}
                   </select>
@@ -217,6 +246,17 @@ export function RuleDialog({
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
+                  ) : cond.field === 'category' ? (
+                    <div className="w-0 flex-1 min-w-0">
+                      <CategorySelect
+                        value={String(cond.value ?? '')}
+                        onChange={(val) => updateCondition(i, 'value', val)}
+                        categories={categories}
+                        groups={categoryGroups}
+                        placeholder={t('rules.selectCategory')}
+                        className={`${selectClass} w-full`}
+                      />
+                    </div>
                   ) : (
                     <Input
                       className="w-0 flex-1 min-w-0 h-8 text-sm"
@@ -256,19 +296,54 @@ export function RuleDialog({
                     value={action.op}
                     onChange={(e) => updateAction(i, 'op', e.target.value)}
                   >
-                    <option value="set_category">{t('rules.setCategory')}</option>
-                    <option value="set_payee">{t('rules.setPayee')}</option>
-                    <option value="append_notes">{t('rules.appendNotes')}</option>
-                    <option value="ignore">{t('rules.ignoreAction')}</option>
+                    {isInterp ? (
+                      <>
+                        <option value="set_transfer">{t('rules.actionSetTransfer')}</option>
+                        <option value="set_financial_type">{t('rules.actionSetFinancialType')}</option>
+                        <option value="set_affects_reports">{t('rules.actionSetAffectsReports')}</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="set_category">{t('rules.setCategory')}</option>
+                        <option value="set_payee">{t('rules.setPayee')}</option>
+                        <option value="append_notes">{t('rules.appendNotes')}</option>
+                        <option value="ignore">{t('rules.ignoreAction')}</option>
+                      </>
+                    )}
                   </select>
-                  {action.op === 'ignore' ? (
+                  {action.op === 'set_transfer' ? (
+                    <span className="w-0 flex-1 min-w-0 text-sm text-muted-foreground italic">
+                      {t('rules.actionSetTransferHint')}
+                    </span>
+                  ) : action.op === 'set_financial_type' ? (
+                    <select
+                      className={`${selectClass} w-0 flex-1 min-w-0`}
+                      value={String(action.value ?? '')}
+                      onChange={(e) => updateAction(i, 'value', e.target.value)}
+                    >
+                      <option value="income">{t('transactions.financialType.income')}</option>
+                      <option value="expense">{t('transactions.financialType.expense')}</option>
+                      <option value="transfer">{t('transactions.financialType.transfer')}</option>
+                      <option value="adjustment">{t('transactions.financialType.adjustment')}</option>
+                      <option value="ignored">{t('transactions.financialType.ignored')}</option>
+                    </select>
+                  ) : action.op === 'set_affects_reports' ? (
+                    <select
+                      className={`${selectClass} w-0 flex-1 min-w-0`}
+                      value={action.value === true || action.value === 'true' ? 'true' : 'false'}
+                      onChange={(e) => updateAction(i, 'value', e.target.value)}
+                    >
+                      <option value="true">{t('common.enabled')}</option>
+                      <option value="false">{t('common.disabled')}</option>
+                    </select>
+                  ) : action.op === 'ignore' ? (
                     <span className="w-0 flex-1 min-w-0 text-sm text-muted-foreground italic">
                       {t('rules.ignoreActionHint')}
                     </span>
                   ) : action.op === 'set_category' ? (
                     <div className="w-0 flex-1 min-w-0">
                       <CategorySelect
-                        value={action.value}
+                        value={String(action.value ?? '')}
                         onChange={(val) => updateAction(i, 'value', val)}
                         categories={categories}
                         groups={categoryGroups}
@@ -279,7 +354,7 @@ export function RuleDialog({
                   ) : action.op === 'set_payee' ? (
                     <select
                       className={`${selectClass} w-0 flex-1 min-w-0`}
-                      value={action.value}
+                      value={String(action.value ?? '')}
                       onChange={(e) => updateAction(i, 'value', e.target.value)}
                       required
                     >
@@ -291,7 +366,7 @@ export function RuleDialog({
                   ) : (
                     <Input
                       className="w-0 flex-1 min-w-0 h-8 text-sm"
-                      value={action.value}
+                      value={String(action.value ?? '')}
                       onChange={(e) => updateAction(i, 'value', e.target.value)}
                       placeholder="Ex: #work #reimbursable"
                     />

@@ -18,10 +18,11 @@ router = APIRouter(prefix="/api/rules", tags=["rules"])
 
 @router.get("", response_model=list[RuleRead])
 async def list_rules(
+    kind: str = "categorization",
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    return await rule_service.get_rules(session, ctx.workspace.id)
+    return await rule_service.get_rules(session, ctx.workspace.id, kind=kind)
 
 
 @router.post("", response_model=RuleCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -132,6 +133,7 @@ async def install_rule_pack(
         pack_code,
         lang,
         create_missing_categories=create_missing_categories,
+        workspace_id=ctx.workspace.id,
     )
     return {
         "installed": len(result.rules),
@@ -145,6 +147,17 @@ async def apply_all_rules(
     ctx: WorkspaceContext = Depends(current_writable_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    """Re-apply all active rules to all existing transactions."""
+    """Re-apply all active CATEGORIZATION rules to all existing transactions."""
     count = await rule_service.apply_all_rules(session, ctx.workspace.id)
+    return {"applied": count}
+
+
+@router.post("/reapply-interpretation", response_model=dict)
+async def reapply_interpretation(
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Recompute financial_type/affects_reports for all transactions from the
+    current interpretation rules. Skips manually-locked rows."""
+    count = await rule_service.reapply_interpretation(session, ctx.workspace.id)
     return {"applied": count}

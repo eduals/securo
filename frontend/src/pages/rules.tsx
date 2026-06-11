@@ -19,9 +19,9 @@ import { PageHeader } from '@/components/page-header'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { RuleDialog } from '@/components/rule-dialog'
 
-function SectionCard({ children }: { children: React.ReactNode }) {
+function SectionCard({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+    <div className={cn('bg-card rounded-xl border border-border shadow-sm overflow-hidden', className)}>
       {children}
     </div>
   )
@@ -67,15 +67,16 @@ const NUMERIC_OPS = [
 function getOpsForField(field: string) {
   if (field === 'amount' || field === 'date') return NUMERIC_OPS
   if (field === 'type') return [{ value: 'equals', label: 'rules.opIs' }]
-  if (field === 'payee_id' || field === 'account_id') return [
+  if (field === 'payee_id' || field === 'account_id' || field === 'category') return [
     { value: 'equals', label: 'rules.opIs' },
     { value: 'not_equals', label: 'rules.opIsNot' },
   ]
   return STRING_OPS
 }
 
-function conditionSummary(conditions: RuleCondition[], conditionsOp: string, t: (key: string) => string, payeesList: Payee[]): string {
+function conditionSummary(conditions: RuleCondition[], conditionsOp: string, t: (key: string) => string, payeesList: Payee[], categoriesList: Category[] = []): string {
   const fieldLabel = (f: string) => {
+    if (f === 'category') return t('rules.fieldCategory')
     const key = CONDITION_FIELDS.find(x => x.value === f)?.label
     return key ? t(key) : f
   }
@@ -87,6 +88,10 @@ function conditionSummary(conditions: RuleCondition[], conditionsOp: string, t: 
     if (c.field === 'payee_id') {
       const p = payeesList.find(p => p.id === c.value)
       return p ? p.name : String(c.value)
+    }
+    if (c.field === 'category') {
+      const cat = categoriesList.find(cat => cat.id === c.value)
+      return cat ? cat.name : String(c.value)
     }
     return String(c.value)
   }
@@ -135,7 +140,7 @@ export default function RulesPage() {
 
   const { data: rulesList } = useQuery({
     queryKey: ['rules'],
-    queryFn: rulesApi.list,
+    queryFn: () => rulesApi.list(),
   })
 
   const { data: categoriesList } = useQuery({
@@ -219,6 +224,79 @@ export default function RulesPage() {
       toast.success(t('rules.applied', { count: data.applied }))
     },
     onError: () => toast.error(t('common.error')),
+  })
+
+  // Interpretation rules (kind=interpretation) are listed and managed in a
+  // separate section. Packs seed them; "Reaplicar interpretação" recomputes
+  // financial_type/affects_reports across all (non-locked) transactions.
+  const { data: interpRulesList } = useQuery({
+    queryKey: ['rules', 'interpretation'],
+    queryFn: () => rulesApi.list('interpretation'),
+  })
+
+  const deleteInterpMutation = useMutation({
+    mutationFn: (id: string) => rulesApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rules', 'interpretation'] })
+      queryClient.invalidateQueries({ queryKey: ['rule-packs'] })
+      invalidateFinancialQueries(queryClient)
+      toast.success(t('rules.deleted'))
+    },
+  })
+
+  const reapplyInterpMutation = useMutation({
+    mutationFn: () => rulesApi.reapplyInterpretation(),
+    onSuccess: (data) => {
+      invalidateFinancialQueries(queryClient)
+      toast.success(t('rules.interpretationReapplied', { count: data.applied }))
+    },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  const [interpDialogOpen, setInterpDialogOpen] = useState(false)
+  const [editingInterp, setEditingInterp] = useState<Rule | null>(null)
+  const [interpDialogInstance, setInterpDialogInstance] = useState(0)
+
+  function openCreateInterp() {
+    setEditingInterp(null)
+    setInterpDialogInstance((n) => n + 1)
+    setInterpDialogOpen(true)
+  }
+
+  function openEditInterp(rule: Rule) {
+    setEditingInterp(rule)
+    setInterpDialogInstance((n) => n + 1)
+    setInterpDialogOpen(true)
+  }
+
+  const onInterpError = (error: unknown) => {
+    const err = error as { response?: { status?: number } }
+    toast.error(err?.response?.status === 409 ? t('rules.duplicateName') : t('common.error'))
+  }
+
+  const createInterpMutation = useMutation({
+    mutationFn: (data: Omit<Rule, 'id' | 'user_id'>) =>
+      rulesApi.create({ ...data, kind: 'interpretation' }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['rules', 'interpretation'] })
+      invalidateFinancialQueries(queryClient)
+      setInterpDialogOpen(false)
+      const applied = result.applied_count ?? 0
+      toast.success(applied > 0 ? t('rules.createdAndApplied', { count: applied }) : t('rules.created'))
+    },
+    onError: onInterpError,
+  })
+
+  const updateInterpMutation = useMutation({
+    mutationFn: ({ id, ...data }: Partial<Rule> & { id: string }) => rulesApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rules', 'interpretation'] })
+      invalidateFinancialQueries(queryClient)
+      setInterpDialogOpen(false)
+      setEditingInterp(null)
+      toast.success(t('rules.updated'))
+    },
+    onError: onInterpError,
   })
 
   const categories = categoriesList ?? []
@@ -355,6 +433,91 @@ export default function RulesPage() {
         )}
       </SectionCard>
 
+      <SectionCard className="mt-6">
+        <SectionHeader
+          title={t('rules.interpretationTitle')}
+          action={
+            canWrite ? (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 h-8"
+                  onClick={() => reapplyInterpMutation.mutate()}
+                  disabled={reapplyInterpMutation.isPending}
+                >
+                  <RefreshCw size={12} />
+                  <span className="hidden sm:inline">{t('rules.reapplyInterpretation')}</span>
+                </Button>
+                <Button size="sm" className="gap-1.5 h-8" onClick={openCreateInterp}>
+                  <Plus size={13} /> <span className="hidden sm:inline">{t('rules.add')}</span>
+                </Button>
+              </div>
+            ) : undefined
+          }
+        />
+        <p className="px-4 sm:px-5 py-2 text-xs text-muted-foreground border-b border-border">
+          {t('rules.interpretationHelp')}
+        </p>
+        {interpRulesList && interpRulesList.length > 0 ? (
+          <div className="divide-y divide-border">
+            {interpRulesList.map((rule) => (
+              <div
+                key={rule.id}
+                className={cn(
+                  'px-4 sm:px-5 py-3 hover:bg-muted transition-colors',
+                  canWrite && 'cursor-pointer',
+                )}
+                onClick={() => { if (canWrite) openEditInterp(rule) }}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-sm font-semibold text-foreground">{rule.name}</p>
+                      {!rule.is_active && (
+                        <span className="text-[10px] font-semibold bg-muted text-muted-foreground px-1.5 py-0 rounded-full">
+                          {t('rules.inactive')}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground font-mono truncate">
+                      {conditionSummary(rule.conditions, rule.conditions_op, t, payees, categories)}
+                    </p>
+                    <p className="text-xs text-sky-600 font-medium mt-0.5">
+                      {rule.actions.map((a) => {
+                        if (a.op === 'set_transfer') return t('rules.interpAction.transfer')
+                        if (a.op === 'set_financial_type') {
+                          return t('rules.interpAction.financialType', {
+                            type: t(`transactions.financialType.${a.value}`),
+                          })
+                        }
+                        if (a.op === 'set_affects_reports') {
+                          return t('rules.interpAction.affectsReports', {
+                            value: a.value ? t('common.enabled') : t('common.disabled'),
+                          })
+                        }
+                        return a.op
+                      }).join(' · ')}
+                    </p>
+                  </div>
+                  {canWrite && (
+                    <button
+                      className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors shrink-0"
+                      onClick={(e) => { e.stopPropagation(); deleteInterpMutation.mutate(rule.id) }}
+                      disabled={deleteInterpMutation.isPending}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground text-center py-10">{t('rules.interpretationEmpty')}</p>
+        )}
+      </SectionCard>
+
       <RulePacksDialog
         open={packsDialogOpen}
         onClose={() => setPacksDialogOpen(false)}
@@ -377,6 +540,26 @@ export default function RulesPage() {
           }
         }}
         loading={createMutation.isPending || updateMutation.isPending}
+      />
+
+      <RuleDialog
+        key={`interp-${interpDialogInstance}`}
+        open={interpDialogOpen}
+        onClose={() => { setInterpDialogOpen(false); setEditingInterp(null) }}
+        rule={editingInterp}
+        kind="interpretation"
+        categories={categories}
+        categoryGroups={categoryGroupsList ?? []}
+        accounts={accountsList ?? []}
+        payees={payees}
+        onSave={(data) => {
+          if (editingInterp) {
+            updateInterpMutation.mutate({ id: editingInterp.id, ...data })
+          } else {
+            createInterpMutation.mutate(data as Omit<Rule, 'id' | 'user_id'>)
+          }
+        }}
+        loading={createInterpMutation.isPending || updateInterpMutation.isPending}
       />
     </div>
   )

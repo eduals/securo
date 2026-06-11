@@ -255,7 +255,6 @@ class TestParseCsv:
         assert transactions[0].amount == Decimal("5000.00")
         assert transactions[1].amount == Decimal("1200.00")
 
-
 class TestParseCsvColumnMapping:
     """Tests for customizable CSV column mapping (issue #201)."""
 
@@ -1238,6 +1237,41 @@ class TestImportTransactionsFx:
         # Currency from CSV should override account currency
         assert tx.currency == "GBP"
         assert tx.amount_primary is not None
+
+    @patch("app.services.fx_rate_service._provider")
+    async def test_import_junk_currency_falls_back_to_account(
+        self, mock_provider, session: AsyncSession, test_user: User, test_workspace, test_account: Account,
+    ):
+        """A non-ISO currency value (e.g. an amount like '11.49' from a
+        mis-mapped column) must not overflow the varchar(3) currency column and
+        500 the import — it falls back to the account currency."""
+        from app.schemas.transaction import TransactionImport
+        from app.models.transaction import Transaction
+        from sqlalchemy import select
+
+        mock_provider.fetch_latest = AsyncMock(return_value={})
+        mock_provider.fetch_historical = AsyncMock(return_value={})
+
+        txns = [
+            TransactionImport(
+                description="Amazon Aws Servicos Br",
+                amount=Decimal("11.49"),
+                date=date(2026, 5, 3),
+                type="debit",
+                currency="11.49",  # junk — would overflow varchar(3)
+            ),
+        ]
+
+        imported, _, _, _ = await import_transactions(
+            session, test_workspace.id, test_user.id, test_account.id, txns, "csv",
+        )
+
+        assert imported == 1
+        result = await session.execute(
+            select(Transaction).where(Transaction.description == "Amazon Aws Servicos Br")
+        )
+        tx = result.scalar_one()
+        assert tx.currency == "BRL"  # account currency fallback
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -476,6 +476,18 @@
         "last90": "Ostatnie 90 dni",
         "thisYear": "Bieżący rok"
       }
+    },
+    "financialType": {
+      "label": "Typ finansowy",
+      "auto": "Automatycznie",
+      "income": "Przychód",
+      "expense": "Wydatek",
+      "transfer": "Transfer",
+      "adjustment": "Korekta",
+      "ignored": "Ignorowane",
+      "autoHint": "Ustalane automatycznie na podstawie kategorii i konta.",
+      "lockedHint": "Ręczne nadpisanie — automatyczne przeliczenie go nie zmieni.",
+      "affectsReports": "Wpływa na raporty"
     }
   },
   "accounts": {
@@ -844,7 +856,24 @@
     "sortLabel": "Sortuj wg",
     "sortBy_priority": "Priorytet",
     "sortBy_name": "Nazwa",
-    "sortBy_category": "Kategoria"
+    "sortBy_category": "Kategoria",
+    "interpretationTitle": "Interpretacja",
+    "reapplyInterpretation": "Zastosuj interpretację ponownie",
+    "interpretationHelp": "Te reguły decydują, jak transakcje liczą się w raportach — np. oznaczając spłaty rachunków i transfery jako neutralne. Dodaj je, instalując pakiet reguł.",
+    "interpretationEmpty": "Brak reguł interpretacji. Zainstaluj pakiet reguł, aby je dodać.",
+    "interpretationReapplied": "Interpretacja zastosowana ponownie do {{count}} transakcji",
+    "interpAction": {
+      "transfer": "Oznacz jako transfer",
+      "financialType": "Ustaw typ: {{type}}",
+      "affectsReports": "Wpływa na raporty: {{value}}"
+    },
+    "fieldCategory": "Kategoria",
+    "actionSetTransfer": "Oznacz jako transfer",
+    "actionSetTransferHint": "Transakcja jest traktowana jako transfer (neutralna w raportach).",
+    "actionSetFinancialType": "Ustaw typ finansowy",
+    "actionSetAffectsReports": "Wpływa na raporty",
+    "newInterpretation": "Nowa reguła interpretacji",
+    "editInterpretation": "Edytuj regułę interpretacji"
   },
   "categories": {
     "title": "Kategorie",
@@ -1211,7 +1240,9 @@
     "showMore_one": "+{{count}} więcej",
     "showMore_few": "+{{count}} więcej",
     "showMore_many": "+{{count}} więcej",
-    "showMore_other": "+{{count}} więcej"
+    "showMore_other": "+{{count}} więcej",
+    "enabled": "Tak",
+    "disabled": "Nie"
   },
   "splitGroups": {
     "title": "Grupy",

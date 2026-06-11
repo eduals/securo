@@ -31,7 +31,7 @@ from app.services import admin_service
 from app.services.account_service import sync_opening_balance_for_connected_account
 from app.services.asset_group_service import ensure_group_for_connection
 from app.services.credit_card_service import apply_effective_date
-from app.services.rule_service import apply_rules_to_transaction
+from app.services.rule_service import apply_interpretation_to_transaction, apply_rules_to_transaction
 from app.services.transfer_detection_service import detect_transfer_pairs
 from app.services.fx_rate_service import stamp_primary_amount
 from app.services.payee_service import get_or_create_payee
@@ -640,6 +640,7 @@ async def handle_oauth_callback(
             new_tx_ids.append(transaction.id)
             if not category_id:
                 await apply_rules_to_transaction(session, user_id, transaction)
+            await apply_interpretation_to_transaction(session, transaction)
 
             # Prefer bank-provided conversion for international transactions
             acct_currency = acc_data.currency or user_currency
@@ -1353,6 +1354,7 @@ async def sync_connection(
                 new_tx_ids.append(transaction.id)
                 if not category_id:
                     await apply_rules_to_transaction(session, user_id, transaction)
+                await apply_interpretation_to_transaction(session, transaction)
 
                 # Prefer bank-provided conversion for international transactions
                 acct_currency = acc_data.currency or user_currency

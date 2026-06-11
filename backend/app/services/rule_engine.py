@@ -23,12 +23,28 @@ def _to_decimal(val) -> Decimal:
         return Decimal("0")
 
 
-def _match_condition(condition: dict, tx: "Transaction") -> bool:
+def _resolve_field(tx: "Transaction", field: str, context: dict | None = None):
+    """Resolve a condition field, including virtual fields that require related
+    objects. `context` (built by the caller from explicitly-loaded Account/
+    Category) supplies `account_type` / `category` / `category_name` so the
+    engine never triggers an async lazy-load. Falls back to plain attributes."""
+    if context is not None and field in context:
+        return context[field]
+    if field == "account_type":
+        acct = getattr(tx, "account", None)
+        return getattr(acct, "type", None) if acct is not None else None
+    if field in ("category", "category_name"):
+        cat = getattr(tx, "category", None)
+        return getattr(cat, "name", None) if cat is not None else None
+    return getattr(tx, field, None)
+
+
+def _match_condition(condition: dict, tx: "Transaction", context: dict | None = None) -> bool:
     field = condition.get("field", "")
     op = condition.get("op", "")
     value = condition.get("value")
 
-    tx_val = getattr(tx, field, None)
+    tx_val = _resolve_field(tx, field, context)
 
     # String operators
     if op in ("contains", "not_contains", "starts_with", "ends_with", "equals", "not_equals", "regex"):
@@ -71,11 +87,14 @@ def _match_condition(condition: dict, tx: "Transaction") -> bool:
     return False
 
 
-def evaluate_conditions(conditions_op: str, conditions: list[dict], tx: "Transaction") -> bool:
-    """Return True if the transaction matches the rule's conditions."""
+def evaluate_conditions(conditions_op: str, conditions: list[dict], tx: "Transaction", context: dict | None = None) -> bool:
+    """Return True if the transaction matches the rule's conditions.
+
+    `context` is an optional dict of pre-resolved virtual fields
+    (account_type/category) used by interpretation rules."""
     if not conditions:
         return False
-    results = [_match_condition(c, tx) for c in conditions]
+    results = [_match_condition(c, tx, context) for c in conditions]
     if conditions_op == "or":
         return any(results)
     return all(results)  # "and" is default
@@ -114,5 +133,19 @@ def apply_rule_actions(
 
         elif op == "ignore":
             tx.is_ignored = True
+
+        # --- Financial interpretation actions (kind='interpretation') ---
+        elif op == "set_financial_type":
+            v = str(value or "").strip().lower()
+            if v in ("income", "expense", "transfer", "adjustment", "ignored"):
+                tx.financial_type = v
+
+        elif op == "set_affects_reports":
+            tx.affects_reports = bool(value)
+
+        elif op == "set_transfer":
+            # Sugar: mark as a neutral internal transfer (out of reports).
+            tx.financial_type = "transfer"
+            tx.affects_reports = False
 
     return category_already_set

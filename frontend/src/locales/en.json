@@ -449,6 +449,18 @@
         "last90": "Last 90 days",
         "thisYear": "This year"
       }
+    },
+    "financialType": {
+      "label": "Financial type",
+      "auto": "Automatic",
+      "income": "Income",
+      "expense": "Expense",
+      "transfer": "Transfer",
+      "adjustment": "Adjustment",
+      "ignored": "Ignored",
+      "autoHint": "Resolved automatically from the category and account.",
+      "lockedHint": "Manual override — automatic recompute won't change it.",
+      "affectsReports": "Affects reports"
     }
   },
   "accounts": {
@@ -790,7 +802,24 @@
     "sortLabel": "Sort by",
     "sortBy_priority": "Priority",
     "sortBy_name": "Name",
-    "sortBy_category": "Category"
+    "sortBy_category": "Category",
+    "interpretationTitle": "Interpretation",
+    "reapplyInterpretation": "Reapply interpretation",
+    "interpretationHelp": "These rules decide how transactions count in reports — e.g. marking bill payments and transfers as neutral. Add them by installing a rule pack.",
+    "interpretationEmpty": "No interpretation rules yet. Install a rule pack to add them.",
+    "interpretationReapplied": "Interpretation reapplied to {{count}} transactions",
+    "interpAction": {
+      "transfer": "Mark as transfer",
+      "financialType": "Set type: {{type}}",
+      "affectsReports": "Affects reports: {{value}}"
+    },
+    "fieldCategory": "Category",
+    "actionSetTransfer": "Mark as transfer",
+    "actionSetTransferHint": "The transaction is treated as a transfer (neutral in reports).",
+    "actionSetFinancialType": "Set financial type",
+    "actionSetAffectsReports": "Affects reports",
+    "newInterpretation": "New interpretation rule",
+    "editInterpretation": "Edit interpretation rule"
   },
   "categories": {
     "title": "Categories",
@@ -1133,7 +1162,9 @@
     "noIconsFound": "No icons found",
     "primaryCurrency": "Primary Currency",
     "showLess": "Show less",
-    "showMore": "+{{count}} more"
+    "showMore": "+{{count}} more",
+    "enabled": "On",
+    "disabled": "Off"
   },
   "splitGroups": {
     "title": "Groups",

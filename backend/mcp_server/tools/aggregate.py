@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
 from app.models.category import Category
+from app.services.financial_interpretation import is_expense_expr, is_income_expr
 from mcp_server.auth import CallContext
 from mcp_server.registry import tool
 from mcp_server.tools._helpers import num, parse_date, parse_uuid_list, resolve_workspace_id
@@ -132,9 +133,9 @@ async def aggregate(
     # Securo convention: type='debit' = expense, type='credit' = income.
     # Amount sign isn't authoritative because some imports normalize it.
     if tx_type == "expense":
-        q = q.where(Transaction.type == "debit")
+        q = q.where(is_expense_expr())
     elif tx_type == "income":
-        q = q.where(Transaction.type == "credit")
+        q = q.where(is_income_expr())
 
     if exclude_transfers:
         q = q.where(Transaction.transfer_pair_id.is_(None))

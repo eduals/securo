@@ -20,6 +20,7 @@ from app.services._query_filters import (
     viewer_shared_pnl,
     viewer_shared_spending_by_category,
 )
+from app.services.financial_interpretation import is_expense_expr, is_income_expr
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.recurring_transaction_service import get_occurrences_in_range
 from app.services.asset_service import get_asset_values_at
@@ -150,8 +151,8 @@ async def get_summary(
     # (whose offset is already in the owner's share, see share-only model).
     monthly_result = await session.execute(
         select(
-            func.sum(case((Transaction.type == "credit", Transaction.amount), else_=0)),
-            func.sum(case((Transaction.type == "debit", Transaction.amount), else_=0)),
+            func.sum(case((is_income_expr(), Transaction.amount), else_=0)),
+            func.sum(case((is_expense_expr(), Transaction.amount), else_=0)),
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(
@@ -271,8 +272,8 @@ async def get_summary(
     # Use amount_primary sums for more accurate multi-currency income/expenses
     primary_result = await session.execute(
         select(
-            func.sum(case((Transaction.type == "credit", Transaction.amount_primary), else_=0)),
-            func.sum(case((Transaction.type == "debit", Transaction.amount_primary), else_=0)),
+            func.sum(case((is_income_expr(), Transaction.amount_primary), else_=0)),
+            func.sum(case((is_expense_expr(), Transaction.amount_primary), else_=0)),
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(
@@ -506,7 +507,7 @@ async def get_spending_by_category(
         .where(
             Transaction.workspace_id == workspace_id,
             Account.is_closed == False,
-            Transaction.type == "debit",
+            is_expense_expr(),
             report_date >= month_start,
             report_date < month_end,
             counts_as_user_pnl(),
@@ -658,8 +659,8 @@ async def get_monthly_trend(
     result = await session.execute(
         select(
             month_label,
-            func.sum(case((Transaction.type == "credit", primary_amt), else_=0)),
-            func.sum(case((Transaction.type == "debit", primary_amt), else_=0)),
+            func.sum(case((is_income_expr(), primary_amt), else_=0)),
+            func.sum(case((is_expense_expr(), primary_amt), else_=0)),
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(

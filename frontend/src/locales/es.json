@@ -447,6 +447,18 @@
         "last90": "Últimos 90 días",
         "thisYear": "Este año"
       }
+    },
+    "financialType": {
+      "label": "Tipo financiero",
+      "auto": "Automático",
+      "income": "Ingreso",
+      "expense": "Gasto",
+      "transfer": "Transferencia",
+      "adjustment": "Ajuste",
+      "ignored": "Ignorado",
+      "autoHint": "Se resuelve automáticamente según la categoría y la cuenta.",
+      "lockedHint": "Anulación manual — el recálculo automático no la cambiará.",
+      "affectsReports": "Afecta a los informes"
     }
   },
   "accounts": {
@@ -788,7 +800,24 @@
     "sortLabel": "Ordenar por",
     "sortBy_priority": "Prioridad",
     "sortBy_name": "Nombre",
-    "sortBy_category": "Categoría"
+    "sortBy_category": "Categoría",
+    "interpretationTitle": "Interpretación",
+    "reapplyInterpretation": "Reaplicar interpretación",
+    "interpretationHelp": "Estas reglas deciden cómo se cuentan las transacciones en los informes — p. ej. marcando pagos de facturas y transferencias como neutrales. Agrégalas instalando un paquete de reglas.",
+    "interpretationEmpty": "Aún no hay reglas de interpretación. Instala un paquete de reglas para agregarlas.",
+    "interpretationReapplied": "Interpretación reaplicada a {{count}} transacciones",
+    "interpAction": {
+      "transfer": "Marcar como transferencia",
+      "financialType": "Definir tipo: {{type}}",
+      "affectsReports": "Afecta a los informes: {{value}}"
+    },
+    "fieldCategory": "Categoría",
+    "actionSetTransfer": "Marcar como transferencia",
+    "actionSetTransferHint": "La transacción se trata como transferencia (neutral en los informes).",
+    "actionSetFinancialType": "Definir tipo financiero",
+    "actionSetAffectsReports": "Afecta a los informes",
+    "newInterpretation": "Nueva regla de interpretación",
+    "editInterpretation": "Editar regla de interpretación"
   },
   "categories": {
     "title": "Categorías",
@@ -1131,7 +1160,9 @@
     "noIconsFound": "No se encontraron iconos",
     "primaryCurrency": "Moneda principal",
     "showLess": "Mostrar menos",
-    "showMore": "+{{count}} más"
+    "showMore": "+{{count}} más",
+    "enabled": "Sí",
+    "disabled": "No"
   },
   "splitGroups": {
     "title": "Grupos",

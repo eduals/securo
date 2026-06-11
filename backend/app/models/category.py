@@ -38,6 +38,10 @@ class Category(Base):
     # When set to True, transactions with this category are treated as if they don't exist
     # for income/expense calculations.
     is_ignored: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Default financial interpretation inherited by transactions in this category
+    # (overridable per transaction). NULL = no default → fall through to baseline.
+    default_financial_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    default_affects_reports: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="categories")
     group: Mapped[Optional["CategoryGroup"]] = relationship(back_populates="categories")

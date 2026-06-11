@@ -16,6 +16,7 @@ from app.models.category import Category
 from app.models.transaction import Transaction
 from app.schemas.budget import BudgetForecastItem, BudgetFromForecastItem
 from app.services._query_filters import counts_as_user_pnl
+from app.services.financial_interpretation import is_expense_expr
 
 
 def _primary_amount_expr():
@@ -49,7 +50,7 @@ async def forecast_from_transactions(
         .join(Transaction, Transaction.category_id == Category.id)
         .where(
             Transaction.workspace_id == workspace_id,
-            Transaction.type == "debit",
+            is_expense_expr(),
             Transaction.date >= from_date,
             Transaction.date <= to_date,
             counts_as_user_pnl(),

@@ -16,6 +16,7 @@ from app.services._query_filters import (
     counts_as_user_pnl,
     owner_split_offset_by_category,
 )
+from app.services.financial_interpretation import is_expense_expr
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.dashboard_service import _get_recurring_projections
 from app.services.fx_rate_service import convert
@@ -270,7 +271,7 @@ async def get_budget_vs_actual(
         )
         .where(
             Transaction.workspace_id == workspace_id,
-            Transaction.type == "debit",
+            is_expense_expr(),
             report_date >= month_start,
             report_date < month_end,
             Transaction.category_id.isnot(None),
@@ -335,7 +336,7 @@ async def get_budget_vs_actual(
         )
         .where(
             Transaction.workspace_id == workspace_id,
-            Transaction.type == "debit",
+            is_expense_expr(),
             report_date >= prev_month_start,
             report_date < prev_month_end,
             Transaction.category_id.isnot(None),

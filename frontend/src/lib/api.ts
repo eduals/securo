@@ -408,7 +408,7 @@ export const transactions = {
   },
   update: async (
     id: string,
-    transaction: Partial<Transaction> & { apply_to_transfer_pair?: boolean },
+    transaction: Partial<Transaction> & { apply_to_transfer_pair?: boolean; clear_interpretation?: boolean },
   ): Promise<Transaction> => {
     const { data } = await api.patch(`/transactions/${id}`, transaction)
     return data
@@ -782,8 +782,8 @@ export const users = {
 
 // Categorization Rules
 export const rules = {
-  list: async (): Promise<Rule[]> => {
-    const { data } = await api.get('/rules')
+  list: async (kind: 'categorization' | 'interpretation' = 'categorization'): Promise<Rule[]> => {
+    const { data } = await api.get('/rules', { params: { kind } })
     return data
   },
   create: async (rule: Omit<Rule, 'id' | 'user_id'>): Promise<Rule & { applied_count: number }> => {
@@ -803,6 +803,10 @@ export const rules = {
   },
   applyAll: async (): Promise<{ applied: number }> => {
     const { data } = await api.post('/rules/apply-all')
+    return data
+  },
+  reapplyInterpretation: async (): Promise<{ applied: number }> => {
+    const { data } = await api.post('/rules/reapply-interpretation')
     return data
   },
   packs: async (): Promise<{ code: string; name: string; flag: string; rule_count: number; installed: boolean }[]> => {

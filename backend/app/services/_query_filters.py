@@ -63,9 +63,16 @@ def counts_as_user_pnl():
     Per-account stats still use `counts_as_pnl` because account ledgers
     track real cash through the account, not user P/L.
     """
+    # Also honor the financial-interpretation `affects_reports` resolution:
+    # transactions whose effective financial_type is transfer/adjustment/ignored
+    # (or explicitly flagged) drop out of user-level reports. Imported lazily to
+    # avoid a circular import.
+    from app.services.financial_interpretation import effective_affects_reports_expr
+
     return and_(
         counts_as_pnl(),
         Transaction.source != "settlement",
+        effective_affects_reports_expr() == True,  # noqa: E712
     )
 
 

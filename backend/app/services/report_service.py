@@ -19,6 +19,7 @@ from app.services._query_filters import (
     counts_as_user_pnl,
     owner_split_offset_by_category,
 )
+from app.services.financial_interpretation import is_expense_expr, is_income_expr
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.account_service import get_account_name
 from app.services.fx_rate_service import convert
@@ -383,8 +384,8 @@ async def get_income_expenses_report(
     result = await session.execute(
         select(
             label_expr,
-            func.sum(case((Transaction.type == "credit", amount_expr), else_=0)),
-            func.sum(case((Transaction.type == "debit", amount_expr), else_=0)),
+            func.sum(case((is_income_expr(), amount_expr), else_=0)),
+            func.sum(case((is_expense_expr(), amount_expr), else_=0)),
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(

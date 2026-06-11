@@ -449,6 +449,18 @@
         "last90": "Últimos 90 dias",
         "thisYear": "Este ano"
       }
+    },
+    "financialType": {
+      "label": "Tipo financeiro",
+      "auto": "Automático",
+      "income": "Receita",
+      "expense": "Despesa",
+      "transfer": "Transferência",
+      "adjustment": "Ajuste",
+      "ignored": "Ignorado",
+      "autoHint": "Resolvido automaticamente a partir da categoria e da conta.",
+      "lockedHint": "Ajuste manual — o recálculo automático não vai alterá-lo.",
+      "affectsReports": "Afeta relatórios"
     }
   },
   "accounts": {
@@ -790,7 +802,24 @@
     "sortLabel": "Ordenar por",
     "sortBy_priority": "Prioridade",
     "sortBy_name": "Nome",
-    "sortBy_category": "Categoria"
+    "sortBy_category": "Categoria",
+    "interpretationTitle": "Interpretação",
+    "reapplyInterpretation": "Reaplicar interpretação",
+    "interpretationHelp": "Estas regras definem como as transações entram nos relatórios — por exemplo, marcando pagamentos de fatura e transferências como neutros. Adicione-as instalando um pacote de regras.",
+    "interpretationEmpty": "Nenhuma regra de interpretação ainda. Instale um pacote de regras para adicioná-las.",
+    "interpretationReapplied": "Interpretação reaplicada a {{count}} transações",
+    "interpAction": {
+      "transfer": "Marcar como transferência",
+      "financialType": "Definir tipo: {{type}}",
+      "affectsReports": "Afeta relatórios: {{value}}"
+    },
+    "fieldCategory": "Categoria",
+    "actionSetTransfer": "Marcar como transferência",
+    "actionSetTransferHint": "A transação é tratada como transferência (neutra nos relatórios).",
+    "actionSetFinancialType": "Definir tipo financeiro",
+    "actionSetAffectsReports": "Afeta relatórios",
+    "newInterpretation": "Nova regra de interpretação",
+    "editInterpretation": "Editar regra de interpretação"
   },
   "categories": {
     "title": "Categorias",
@@ -1133,7 +1162,9 @@
     "noIconsFound": "Nenhum ícone encontrado",
     "primaryCurrency": "Moeda Principal",
     "showLess": "Mostrar menos",
-    "showMore": "Mostrar +{{count}}"
+    "showMore": "Mostrar +{{count}}",
+    "enabled": "Sim",
+    "disabled": "Não"
   },
   "splitGroups": {
     "title": "Grupos",

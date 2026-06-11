@@ -49,6 +49,12 @@ class TransactionUpdate(BaseModel):
     amount_primary: Optional[Decimal] = None
     fx_rate_used: Optional[Decimal] = None
     is_ignored: Optional[bool] = None
+    # Manual financial-interpretation override. Setting financial_type and/or
+    # affects_reports locks the transaction (auto-recompute skips it).
+    # `clear_interpretation=True` resets to automatic (clears both + unlocks).
+    financial_type: Optional[str] = None
+    affects_reports: Optional[bool] = None
+    clear_interpretation: bool = False
     apply_to_transfer_pair: bool = False
     # CC bucketing override (issue #92). Empty string / explicit null clears
     # it back to auto. Only meaningful for credit-card accounts.
@@ -95,6 +101,12 @@ class TransactionRead(TransactionBase):
     # instead of a generic "shared" badge.
     parent_owner_name: Optional[str] = None
     is_ignored: bool = False
+    # Financial interpretation (raw overrides). NULL = automatic (resolved from
+    # category default / account-type baseline at report time). `locked` means a
+    # manual override that the auto-recompute won't touch.
+    financial_type: Optional[str] = None
+    affects_reports: Optional[bool] = None
+    interpretation_locked: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

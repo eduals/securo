@@ -63,6 +63,7 @@ import { useCollectionFilter } from '@/contexts/collection-filter-context'
 
 type TransactionUpdatePayload = Partial<Transaction> & {
   apply_to_transfer_pair?: boolean
+  clear_interpretation?: boolean
 }
 
 type PendingTransferCategoryUpdate = {
@@ -824,7 +825,7 @@ export default function TransactionsPage() {
   }
 
   const handleTransactionSave = (
-    data: Partial<Transaction>,
+    data: Partial<Transaction> & { clear_interpretation?: boolean },
     recurringData?: { frequency: string; end_date?: string },
     pendingFiles?: File[],
     action?: SaveAction,

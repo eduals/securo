@@ -79,6 +79,14 @@ class Transaction(Base):
     # Flag to exclude this transaction from reports and dashboard aggregations.
     # When set to True, the transaction is ignored for income/expense calculations.
     is_ignored: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Financial interpretation layer (derived P&L meaning, separate from raw `type`).
+    # NULL = not overridden → reports resolve via category default / account-type
+    # baseline at query time. Governs P&L/reports ONLY, never balances.
+    financial_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    affects_reports: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    # True when a user manually set the interpretation — protects it from
+    # automatic recompute (reapply-interpretation skips locked rows).
+    interpretation_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     account: Mapped["Account"] = relationship(back_populates="transactions")

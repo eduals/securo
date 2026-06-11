@@ -516,3 +516,102 @@ async def test_matching_rules_unknown_tx_404(client: AsyncClient, auth_headers):
     import uuid as _uuid
     resp = await client.get(f"/api/transactions/{_uuid.uuid4()}/matching-rules", headers=auth_headers)
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Financial interpretation rules (kind='interpretation')
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.asyncio
+async def test_create_interpretation_rule_kind_and_listing(client, auth_headers, test_categories):
+    cat = test_categories[0]
+    rule = (await client.post("/api/rules", headers=auth_headers, json={
+        "name": "Interp Transfer", "kind": "interpretation", "conditions_op": "or",
+        "conditions": [{"field": "category", "op": "equals", "value": cat.name}],
+        "actions": [{"op": "set_transfer"}],
+    })).json()
+    assert rule["kind"] == "interpretation"
+    # Categorization listing (default) excludes it; interpretation listing includes it.
+    cat_list = (await client.get("/api/rules", headers=auth_headers)).json()
+    assert all(r["id"] != rule["id"] for r in cat_list)
+    interp_list = (await client.get("/api/rules?kind=interpretation", headers=auth_headers)).json()
+    assert any(r["id"] == rule["id"] for r in interp_list)
+
+
+@pytest.mark.asyncio
+async def test_interpretation_applied_on_create(client, auth_headers, session, test_account, test_categories):
+    import uuid as _uuid
+    from sqlalchemy import select
+    from app.models.transaction import Transaction
+
+    cat = test_categories[0]
+    await client.post("/api/rules", headers=auth_headers, json={
+        "name": "Cat to transfer", "kind": "interpretation", "conditions_op": "or",
+        "conditions": [{"field": "category", "op": "equals", "value": cat.name}],
+        "actions": [{"op": "set_transfer"}],
+    })
+    tx = (await client.post("/api/transactions", headers=auth_headers, json={
+        "account_id": str(test_account.id), "category_id": str(cat.id),
+        "description": "Should be transfer", "amount": "100", "date": "2026-06-01", "type": "debit",
+    })).json()
+
+    session.expire_all()
+    t = (await session.execute(
+        select(Transaction).where(Transaction.id == _uuid.UUID(tx["id"]))
+    )).scalar_one()
+    assert t.financial_type == "transfer"
+    assert t.affects_reports is False
+
+
+@pytest.mark.asyncio
+async def test_reapply_interpretation_endpoint(client, auth_headers, session, test_account, test_categories):
+    import uuid as _uuid
+    from sqlalchemy import select
+    from app.models.transaction import Transaction
+
+    cat = test_categories[0]
+    # Transaction created BEFORE the rule exists → baseline (expense).
+    tx = (await client.post("/api/transactions", headers=auth_headers, json={
+        "account_id": str(test_account.id), "category_id": str(cat.id),
+        "description": "Later transfer", "amount": "50", "date": "2026-06-01", "type": "debit",
+    })).json()
+    # Create the interpretation rule and reapply retroactively.
+    await client.post("/api/rules", headers=auth_headers, json={
+        "name": "Retro transfer", "kind": "interpretation", "conditions_op": "or",
+        "conditions": [{"field": "category", "op": "equals", "value": cat.name}],
+        "actions": [{"op": "set_transfer"}],
+    })
+    resp = await client.post("/api/rules/reapply-interpretation", headers=auth_headers)
+    assert resp.status_code == 200
+
+    session.expire_all()
+    t = (await session.execute(
+        select(Transaction).where(Transaction.id == _uuid.UUID(tx["id"]))
+    )).scalar_one()
+    assert t.financial_type == "transfer"
+
+
+@pytest.mark.asyncio
+async def test_install_pack_seeds_and_applies_interpretation(client, auth_headers, session, test_account, test_categories):
+    import uuid as _uuid
+    from sqlalchemy import select
+    from app.models.transaction import Transaction
+
+    # A bill-payment-looking transaction, created before installing the pack.
+    tx = (await client.post("/api/transactions", headers=auth_headers, json={
+        "account_id": str(test_account.id), "description": "Pagamento de fatura",
+        "amount": "500", "date": "2026-06-01", "type": "debit",
+    })).json()
+
+    resp = await client.post("/api/rules/packs/BR/install", headers=auth_headers)
+    assert resp.status_code == 200
+
+    interp = (await client.get("/api/rules?kind=interpretation", headers=auth_headers)).json()
+    assert any("fatura" in r["name"].lower() for r in interp)
+
+    session.expire_all()
+    t = (await session.execute(
+        select(Transaction).where(Transaction.id == _uuid.UUID(tx["id"]))
+    )).scalar_one()
+    assert t.financial_type == "transfer"
+    assert t.affects_reports is False

@@ -12,8 +12,8 @@ class RuleCondition(BaseModel):
 
 
 class RuleAction(BaseModel):
-    op: str      # set_category, append_notes
-    value: Any   # category UUID str or notes string
+    op: str      # set_category, append_notes, ignore, set_financial_type, set_affects_reports, set_transfer
+    value: Any = None  # optional: omitted for valueless actions like ignore / set_transfer
 
 
 class RuleCreate(BaseModel):
@@ -23,6 +23,7 @@ class RuleCreate(BaseModel):
     actions: list[RuleAction]
     priority: int = 0
     is_active: bool = True
+    kind: str = "categorization"  # 'categorization' | 'interpretation'
 
 
 class AddDescriptionRequest(BaseModel):
@@ -57,6 +58,7 @@ class RuleRead(BaseModel):
     actions: list[dict]
     priority: int
     is_active: bool
+    kind: str = "categorization"
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -213,6 +213,12 @@ export interface Transaction {
   parent_owner_name?: string | null
   // Flag to exclude this transaction from reports and dashboard aggregations
   is_ignored: boolean
+  // Financial interpretation (raw override). null = automatic (resolved from
+  // category default / account-type baseline). `interpretation_locked` = a
+  // manual override the auto-recompute won't touch.
+  financial_type: 'income' | 'expense' | 'transfer' | 'adjustment' | 'ignored' | null
+  affects_reports: boolean | null
+  interpretation_locked: boolean
 }
 
 export type ShareType = 'equal' | 'exact' | 'percent'
@@ -326,7 +332,9 @@ export interface RuleCondition {
 
 export interface RuleAction {
   op: string
-  value: string
+  // string for set_category/set_payee/append_notes; boolean for
+  // set_affects_reports; null for valueless ops like ignore / set_transfer.
+  value: string | number | boolean | null
 }
 
 export interface Rule {
@@ -338,6 +346,7 @@ export interface Rule {
   actions: RuleAction[]
   priority: number
   is_active: boolean
+  kind?: 'categorization' | 'interpretation'
 }
 
 export interface ImportLog {

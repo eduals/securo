@@ -25,5 +25,8 @@ class Rule(Base):
     actions: Mapped[list] = mapped_column(JSON, default=list)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 'categorization' (sets category/payee/notes/ignore) or 'interpretation'
+    # (sets financial_type/affects_reports). Same engine; two UI modules.
+    kind: Mapped[str] = mapped_column(String(20), default="categorization", server_default="categorization")
 
     user: Mapped["User"] = relationship()

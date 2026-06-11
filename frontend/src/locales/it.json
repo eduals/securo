@@ -422,6 +422,18 @@
         "last90": "Ultimi 90 giorni",
         "thisYear": "Quest'anno"
       }
+    },
+    "financialType": {
+      "label": "Tipo finanziario",
+      "auto": "Automatico",
+      "income": "Entrata",
+      "expense": "Spesa",
+      "transfer": "Trasferimento",
+      "adjustment": "Rettifica",
+      "ignored": "Ignorato",
+      "autoHint": "Determinato automaticamente dalla categoria e dal conto.",
+      "lockedHint": "Override manuale — il ricalcolo automatico non lo modificherà.",
+      "affectsReports": "Influisce sui report"
     }
   },
   "accounts": {
@@ -763,7 +775,24 @@
     "sortLabel": "Ordina per",
     "sortBy_priority": "Priorità",
     "sortBy_name": "Nome",
-    "sortBy_category": "Categoria"
+    "sortBy_category": "Categoria",
+    "interpretationTitle": "Interpretazione",
+    "reapplyInterpretation": "Riapplica interpretazione",
+    "interpretationHelp": "Queste regole decidono come le transazioni vengono conteggiate nei report — ad es. contrassegnando pagamenti di estratti conto e trasferimenti come neutri. Aggiungile installando un pacchetto di regole.",
+    "interpretationEmpty": "Nessuna regola di interpretazione. Installa un pacchetto di regole per aggiungerle.",
+    "interpretationReapplied": "Interpretazione riapplicata a {{count}} transazioni",
+    "interpAction": {
+      "transfer": "Segna come trasferimento",
+      "financialType": "Imposta tipo: {{type}}",
+      "affectsReports": "Influisce sui report: {{value}}"
+    },
+    "fieldCategory": "Categoria",
+    "actionSetTransfer": "Segna come trasferimento",
+    "actionSetTransferHint": "La transazione è trattata come trasferimento (neutra nei report).",
+    "actionSetFinancialType": "Imposta tipo finanziario",
+    "actionSetAffectsReports": "Influisce sui report",
+    "newInterpretation": "Nuova regola di interpretazione",
+    "editInterpretation": "Modifica regola di interpretazione"
   },
   "categories": {
     "title": "Categorie",
@@ -1105,7 +1134,9 @@
     "noIconsFound": "Nessuna icona trovata",
     "primaryCurrency": "Valuta principale",
     "showLess": "Mostra meno",
-    "showMore": "+{{count}} altri"
+    "showMore": "+{{count}} altri",
+    "enabled": "Sì",
+    "disabled": "No"
   },
   "splitGroups": {
     "title": "Gruppi",

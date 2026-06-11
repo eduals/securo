@@ -92,7 +92,7 @@ export function TransactionDialog({
   categoryGroups: CategoryGroup[]
   accounts: { id: string; name: string; type?: string }[]
   recurringMatch?: RecurringTransaction
-  onSave: (data: Partial<Transaction>, recurringData?: { frequency: string; end_date?: string }, pendingFiles?: File[], action?: SaveAction) => void
+  onSave: (data: Partial<Transaction> & { clear_interpretation?: boolean }, recurringData?: { frequency: string; end_date?: string }, pendingFiles?: File[], action?: SaveAction) => void
   onDelete?: () => void
   onUnlinkTransfer?: (pairId: string) => void
   onIgnoreChanged?: () => void
@@ -308,7 +308,7 @@ function TransactionForm({
   categoryGroups: CategoryGroup[]
   accounts: { id: string; name: string; type?: string }[]
   recurringMatch?: RecurringTransaction
-  onSave: (data: Partial<Transaction>, recurringData?: { frequency: string; end_date?: string }, pendingFiles?: File[], action?: SaveAction) => void
+  onSave: (data: Partial<Transaction> & { clear_interpretation?: boolean }, recurringData?: { frequency: string; end_date?: string }, pendingFiles?: File[], action?: SaveAction) => void
   onDelete?: () => void
   onUnlinkTransfer?: (pairId: string) => void
   onIgnoreChanged?: () => void
@@ -336,7 +336,7 @@ function TransactionForm({
   })
   const { data: rulesList } = useQuery({
     queryKey: ['rules'],
-    queryFn: rulesApi.list,
+    queryFn: () => rulesApi.list(),
   })
   const navigate = useNavigate()
   // Active category rules that already cover this (saved) transaction. When
@@ -460,6 +460,17 @@ function TransactionForm({
   }, [description, isSynced])
   const [isIgnored, setIsIgnored] = useState(seed?.is_ignored ?? false)
   const [togglingIgnore, setTogglingIgnore] = useState(false)
+
+  // Manual financial-interpretation override. '' = automatic (resolved from
+  // category default / account-type baseline / interpretation rules). A
+  // concrete value locks the row so the auto-recompute won't touch it.
+  // The select is prefilled with whatever is currently stored (manual OR
+  // rule-applied); the payload is only sent when the user actually changes it,
+  // so a plain edit never wipes a rule-applied financial_type.
+  const initialFinType = (seed?.financial_type ?? '') as '' | 'income' | 'expense' | 'transfer' | 'adjustment' | 'ignored'
+  const initialFinAffects = seed?.affects_reports ?? true
+  const [finType, setFinType] = useState(initialFinType)
+  const [finAffects, setFinAffects] = useState(initialFinAffects)
 
   const handleToggleIgnore = async () => {
     if (!seed?.id || togglingIgnore) return
@@ -595,6 +606,19 @@ function TransactionForm({
           : hadInitialSplits
             ? { splits: { share_type: 'equal', splits: [] } }
             : {}
+        // Manual financial-interpretation override (edit only). Only sent when
+        // the user actually changed the control — otherwise a plain edit would
+        // wipe a rule-applied financial_type. '' resets to automatic via
+        // clear_interpretation; a concrete type locks the row.
+        const interpChanged =
+          !isCreating &&
+          (finType !== initialFinType || (finType !== '' && finAffects !== initialFinAffects))
+        const interpPayload: Partial<Transaction> & { clear_interpretation?: boolean } =
+          interpChanged
+            ? finType === ''
+              ? { clear_interpretation: true }
+              : { financial_type: finType, affects_reports: finAffects }
+            : {}
         const txData = isSynced
           ? {
               category_id: categoryId || null,
@@ -603,7 +627,8 @@ function TransactionForm({
               is_ignored: isIgnored,
               ...overridePayload,
               ...splitsPayload,
-            } as Partial<Transaction>
+              ...interpPayload,
+            } as Partial<Transaction> & { clear_interpretation?: boolean }
           : {
               description,
               amount: parseFloat(amount),
@@ -618,7 +643,8 @@ function TransactionForm({
               ...fxFields,
               ...overridePayload,
               ...splitsPayload,
-            } as Partial<Transaction>
+              ...interpPayload,
+            } as Partial<Transaction> & { clear_interpretation?: boolean }
         // Carried for both create and edit: when the recurring checkbox is
         // on, the parent creates the recurring rule on save (skip_first).
         const recurringData = isRecurring
@@ -1028,6 +1054,52 @@ function TransactionForm({
                 ))}
               </select>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Manual financial-interpretation override (edit only). Lets the user
+          force how a transaction counts in reports — overriding the automatic
+          resolution (category default / account-type baseline / interpretation
+          rules). Choosing "Automatic" clears the override. */}
+      {transaction && (
+        <div className="space-y-3 border rounded-md p-3">
+          <div className="space-y-2">
+            <Label>{t('transactions.financialType.label')}</Label>
+            <select
+              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus-visible:ring-ring/30 focus-visible:ring-[2px]"
+              value={finType}
+              onChange={(e) => {
+                const next = e.target.value as typeof finType
+                setFinType(next)
+                // Sensible default: income/expense feed reports; transfer /
+                // adjustment / ignored are neutral. User can still override.
+                if (next !== '') setFinAffects(next === 'income' || next === 'expense')
+              }}
+            >
+              <option value="">{t('transactions.financialType.auto')}</option>
+              <option value="income">{t('transactions.financialType.income')}</option>
+              <option value="expense">{t('transactions.financialType.expense')}</option>
+              <option value="transfer">{t('transactions.financialType.transfer')}</option>
+              <option value="adjustment">{t('transactions.financialType.adjustment')}</option>
+              <option value="ignored">{t('transactions.financialType.ignored')}</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {finType === ''
+                ? t('transactions.financialType.autoHint')
+                : t('transactions.financialType.lockedHint')}
+            </p>
+          </div>
+          {finType !== '' && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={finAffects}
+                onChange={(e) => setFinAffects(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <span className="text-sm font-medium">{t('transactions.financialType.affectsReports')}</span>
+            </label>
           )}
         </div>
       )}

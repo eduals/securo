@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import select, func, or_, not_, update
+from sqlalchemy import select, func, or_, not_, update, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,9 +19,14 @@ from app.schemas.transaction import TransactionCreate, TransactionUpdate, Transf
 from app.schemas.transaction_split import TransactionSplitInput, TransactionSplitsInput
 from app.services import split_service
 from app.services.credit_card_service import apply_effective_date
-from app.services.rule_service import apply_rules_to_transaction
+from app.services.rule_service import apply_interpretation_to_transaction, apply_rules_to_transaction
 from app.services.fx_rate_service import stamp_primary_amount, convert as fx_convert
 from app.services._query_filters import counts_as_pnl
+from app.services.financial_interpretation import (
+    EXPENSE,
+    INCOME,
+    effective_financial_type_expr_for,
+)
 
 
 def _apply_fx_override(transaction, amount, amount_primary=None, fx_rate_used=None):
@@ -372,19 +377,24 @@ async def get_transactions(
         amount_norm = func.coalesce(
             pnl_subq.c.amount_primary, pnl_subq.c.amount
         )
+        # Income/expense use the EFFECTIVE financial_type (interpretation layer)
+        # rather than raw credit/debit, so e.g. a credit-card charge counts as
+        # expense (not income). Resolved over the subquery's own columns.
+        eft = effective_financial_type_expr_for(
+            pnl_subq.c.financial_type,
+            pnl_subq.c.type,
+            pnl_subq.c.account_id,
+            pnl_subq.c.category_id,
+        )
         summary_rows = await session.execute(
             select(
-                pnl_subq.c.type,
-                func.coalesce(func.sum(func.abs(amount_norm)), 0),
-            ).group_by(pnl_subq.c.type)
+                func.coalesce(func.sum(case((eft == INCOME, func.abs(amount_norm)), else_=0)), 0),
+                func.coalesce(func.sum(case((eft == EXPENSE, func.abs(amount_norm)), else_=0)), 0),
+            )
         )
-        income = Decimal("0")
-        expense = Decimal("0")
-        for row_type, row_total in summary_rows:
-            if row_type == "credit":
-                income = Decimal(str(row_total or 0))
-            elif row_type == "debit":
-                expense = Decimal(str(row_total or 0))
+        income_total, expense_total = summary_rows.one()
+        income = Decimal(str(income_total or 0))
+        expense = Decimal(str(expense_total or 0))
 
         # Excluded: the absolute total of everything filtered out of P/L for
         # the same rows — the complement of `counts_as_pnl()`. Surfaces
@@ -673,6 +683,8 @@ async def create_transaction(
     # Apply rules only if no explicit category provided
     if not data.category_id:
         await apply_rules_to_transaction(session, user_id, transaction)
+    # Interpretation always runs (after categorization), can condition on category.
+    await apply_interpretation_to_transaction(session, transaction)
 
     # Stamp primary currency amount (manual override or auto)
     if data.amount_primary is not None or data.fx_rate_used is not None:
@@ -1126,6 +1138,25 @@ async def update_transaction(
     override_amount_primary = update_data.pop("amount_primary", None)
     override_fx_rate = update_data.pop("fx_rate_used", None)
     has_fx_override = override_amount_primary is not None or override_fx_rate is not None
+
+    # Manual financial-interpretation override (handled before the generic
+    # setattr loop). Setting financial_type/affects_reports locks the row;
+    # clear_interpretation resets it to automatic.
+    clear_interp = update_data.pop("clear_interpretation", False)
+    ft_sent = "financial_type" in update_data
+    ar_sent = "affects_reports" in update_data
+    interp_ft = update_data.pop("financial_type", None)
+    interp_ar = update_data.pop("affects_reports", None)
+    if clear_interp:
+        transaction.financial_type = None
+        transaction.affects_reports = None
+        transaction.interpretation_locked = False
+    elif ft_sent or ar_sent:
+        if ft_sent:
+            transaction.financial_type = interp_ft
+        if ar_sent:
+            transaction.affects_reports = interp_ar
+        transaction.interpretation_locked = True
 
     restamp_fields = {"amount", "currency", "date"}
     needs_restamp = bool(restamp_fields & update_data.keys())
