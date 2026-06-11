@@ -255,6 +255,34 @@ class TestParseCsv:
         assert transactions[0].amount == Decimal("5000.00")
         assert transactions[1].amount == Decimal("1200.00")
 
+    def test_parse_csv_quoted_embedded_comma_past_sniff_window(self):
+        """A quoted description with an embedded comma must survive even when
+        its doubled-quote escape appears past the 4 KB sniffer sample.
+
+        Regression: re-importing Securo's own export crashed with
+        "'NoneType' object has no attribute 'lower'". The Sniffer saw no
+        escaped quote in the first 4 KB, guessed doublequote=False, then
+        mis-split the embedded comma into an extra column — which DictReader
+        files under the None restkey (issue: re-import of exported CSV).
+        """
+        # ~200 plain rows push the quoted row well past the 4096-char sample.
+        padding = "".join(
+            f"2026-01-15,Plain Row {i},-{i}.00\n" for i in range(200)
+        )
+        csv_content = (
+            "date,description,amount\n"
+            + padding
+            + '2026-05-17,"IOF de ""Openrouter, Inc""",1.99\n'
+        )
+
+        transactions = parse_csv(csv_content.encode("utf-8"))
+
+        assert len(transactions) == 201
+        iof = transactions[-1]
+        assert iof.description == 'IOF de "Openrouter, Inc"'
+        assert iof.amount == Decimal("1.99")
+
+
 class TestParseCsvColumnMapping:
     """Tests for customizable CSV column mapping (issue #201)."""
 

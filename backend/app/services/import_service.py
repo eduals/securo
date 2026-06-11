@@ -275,9 +275,20 @@ CSV_MAPPABLE_FIELDS = (
 
 
 def _sniff_csv_dialect(text: str):
-    """Detect the CSV dialect (delimiter/quoting), falling back to comma."""
+    """Detect the CSV dialect (delimiter/quoting), falling back to comma.
+
+    The sniffer infers the delimiter reliably but guesses `doublequote` from
+    whether the 4 KB sample happens to contain a doubled-quote escape. Files
+    whose first escaped quote appears later (e.g. Securo's own export, where a
+    quoted description with an embedded comma sits past the sample window) get
+    `doublequote=False`, which mis-parses the embedded comma into extra
+    columns. Force the near-universal doubled-quote escaping convention — what
+    Python's csv writer, Excel, and our exporter all emit.
+    """
     try:
-        return csv.Sniffer().sniff(text[:4096], delimiters=',;\t|')
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=',;\t|')
+        dialect.doublequote = True
+        return dialect
     except csv.Error:
         return csv.excel
 
@@ -400,8 +411,10 @@ def parse_csv(
 
     transactions = []
     for row in reader:
-        # Normalize row keys
-        row = {k.lower().strip(): v for k, v in row.items()}
+        # Normalize row keys. A malformed row with more fields than headers
+        # files the overflow under DictReader's `None` restkey — skip it so we
+        # never call `.lower()` on None (and the row simply maps known columns).
+        row = {k.lower().strip(): v for k, v in row.items() if k is not None}
 
         # Parse date
         date_str = row[date_col].strip()
